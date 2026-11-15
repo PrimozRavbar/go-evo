@@ -1,10 +1,17 @@
-"""Genome-encoded MLP Go players.
+"""Genome-encoded Go players.
 
 A *genome* is a flat float32 vector holding every weight and bias of a fixed
-MLP architecture. The phenotype (``Player``) is a PyTorch ``nn.Sequential``
-with ``num_layers`` Linear layers (default 10) whose parameters are loaded from
-the genome. This flat representation makes mutation / crossover trivial in the
-evolutionary phase.
+architecture (``NetConfig.arch``):
+
+* ``"mlp"``  - ``num_layers`` Linear layers (default 10, hidden 128), phases 1-2c.
+* ``"conv"`` - ``num_layers`` 3x3 convolutions with ``channels`` channels (zero padding),
+  then a 1x1 convolution giving one logit per point and a linear pass logit computed
+  from the globally averaged features. Inputs are ``CONV_PLANES`` feature planes,
+  including liberty counts. The weights are shared over the board, so the genome
+  size does not depend on the board size.
+
+Inference runs in numpy (much faster than torch at batch size 1); ``Player.net``
+builds the equivalent torch module for checks and export.
 """
 from __future__ import annotations
 
@@ -16,15 +23,29 @@ import torch.nn as nn
 
 from .engine import EMPTY, GoGame
 
-NUM_FEATURE_PLANES = 4  # own stones, opponent stones, empty, legal-for-me
+NUM_FEATURE_PLANES = 4  # MLP: own stones, opponent stones, empty, legal-for-me
+# conv: own, opponent, empty, legal, own group with 1 / 2 / >=3 liberties,
+#       opponent group with 1 / 2 / >=3 liberties, constant ones (shows the board edge)
+CONV_PLANES = 11
 
 
 @dataclass
 class NetConfig:
     board_size: int = 19
-    num_layers: int = 10       # number of Linear layers (input + hidden + output)
-    hidden: int = 128          # width of every hidden layer
+    num_layers: int = 10       # MLP: Linear layers; conv: 3x3 conv layers
+    hidden: int = 128          # MLP: width of every hidden layer
     activation: str = "tanh"   # tanh | relu | gelu
+    arch: str = "mlp"          # mlp | conv
+    channels: int = 16         # conv: channels of every conv layer
+
+    def param_shapes(self) -> list[tuple[tuple[int, ...], int, int]]:
+        """[(weight shape, bias size, fan_in)] in genome order."""
+        if self.arch == "conv":
+            C = self.channels
+            out = [((C, CONV_PLANES, 3, 3), C, CONV_PLANES * 9)]
+            out += [((C, C, 3, 3), C, C * 9)] * (self.num_layers - 1)
+            return out + [((1, C, 1, 1), 1, C), ((1, C), 1, C)]  # point head, pass head
+        return [((o, i), o, i) for i, o in self.layer_dims()]
 
     @property
     def in_dim(self) -> int:
@@ -41,14 +62,35 @@ class NetConfig:
 
     @property
     def genome_size(self) -> int:
-        return sum(i * o + o for i, o in self.layer_dims())
+        return sum(int(np.prod(w)) + b for w, b, _ in self.param_shapes())
 
 
 _ACT = {"tanh": nn.Tanh, "relu": nn.ReLU, "gelu": nn.GELU}
 _GAIN = {"tanh": 5.0 / 3.0, "relu": 2 ** 0.5, "gelu": 2 ** 0.5}
 
 
-def build_net(cfg: NetConfig) -> nn.Sequential:
+class ConvNet(nn.Module):
+    """Torch reference of the conv architecture (input (B, CONV_PLANES, N, N))."""
+
+    def __init__(self, cfg: NetConfig):
+        super().__init__()
+        C = cfg.channels
+        self.convs = nn.ModuleList([nn.Conv2d(CONV_PLANES if k == 0 else C, C, 3, padding=1)
+                                    for k in range(cfg.num_layers)])
+        self.point = nn.Conv2d(C, 1, 1)
+        self.pass_ = nn.Linear(C, 1)
+        self.act = _ACT[cfg.activation]()
+
+    def forward(self, x):
+        for conv in self.convs:
+            x = self.act(conv(x))
+        pts = self.point(x).flatten(1)
+        return torch.cat([pts, self.pass_(x.mean((2, 3)))], 1)
+
+
+def build_net(cfg: NetConfig) -> nn.Module:
+    if cfg.arch == "conv":
+        return ConvNet(cfg)
     layers: list[nn.Module] = []
     dims = cfg.layer_dims()
     for k, (i, o) in enumerate(dims):
@@ -62,9 +104,9 @@ def random_genome(cfg: NetConfig, rng: np.random.Generator) -> np.ndarray:
     """Variance-preserving random init (so signals survive 10 layers)."""
     parts = []
     gain = _GAIN[cfg.activation]
-    for i, o in cfg.layer_dims():
-        w = rng.normal(0.0, gain / np.sqrt(i), size=(o, i))
-        b = rng.normal(0.0, 0.1, size=o)
+    for wshape, nb, fan_in in cfg.param_shapes():
+        w = rng.normal(0.0, gain / np.sqrt(fan_in), size=wshape)
+        b = rng.normal(0.0, 0.1, size=nb)
         parts += [w.ravel(), b]
     return np.concatenate(parts).astype(np.float32)
 
@@ -84,8 +126,33 @@ def encode_state(game: GoGame, legal: np.ndarray, max_moves: int) -> np.ndarray:
     return np.append(x, progress)
 
 
+def encode_planes(game: GoGame, legal: np.ndarray) -> np.ndarray:
+    """(CONV_PLANES, N, N) float32 features for the conv net, from the mover's view."""
+    b = game.board
+    me = game.to_play
+    libs = game.liberty_map()
+    mine, theirs = b == me, b == -me
+    x = np.empty((CONV_PLANES,) + b.shape, dtype=np.float32)
+    x[0], x[1], x[2] = mine, theirs, b == EMPTY
+    x[3] = legal[:-1].reshape(b.shape)
+    for k, own in ((4, mine), (7, theirs)):
+        x[k] = own & (libs == 1)
+        x[k + 1] = own & (libs == 2)
+        x[k + 2] = own & (libs >= 3)
+    x[10] = 1.0
+    return x
+
+
+def _conv3x3(x, W2, b, n):
+    """x (Cin, n, n), W2 (Cout, Cin*9) -> (Cout, n, n); zero padding."""
+    xp = np.zeros((x.shape[0], n + 2, n + 2), dtype=np.float32)
+    xp[:, 1:-1, 1:-1] = x
+    cols = np.stack([xp[:, dy:dy + n, dx:dx + n] for dy in range(3) for dx in range(3)], axis=1)
+    return (W2 @ cols.reshape(-1, n * n) + b[:, None]).reshape(-1, n, n)
+
+
 class Player:
-    """Phenotype: a genome loaded into an MLP that picks moves."""
+    """Phenotype: a genome loaded into a network (MLP or conv) that picks moves."""
 
     def __init__(self, genome: np.ndarray, cfg: NetConfig, name: str = "player",
                  device: str = "cpu"):
@@ -98,17 +165,29 @@ class Player:
         # numpy copies of the weights: for batch-1 inference numpy is much faster than torch
         self._layers = []
         off = 0
-        for i, o in cfg.layer_dims():
-            W = genome[off:off + i * o].reshape(o, i).T.copy()
-            off += i * o
-            b = genome[off:off + o]
-            off += o
+        for wshape, nb, _ in cfg.param_shapes():
+            nw = int(np.prod(wshape))
+            W = genome[off:off + nw].reshape(wshape)
+            off += nw
+            b = genome[off:off + nb]
+            off += nb
+            if cfg.arch == "conv":
+                W = W.reshape(wshape[0], -1).copy()  # (Cout, Cin*k*k), matches _conv3x3's columns
+            else:
+                W = W.T.copy()
             self._layers.append((W, b))
         self._act = {"tanh": np.tanh, "relu": lambda z: np.maximum(z, 0),
                      "gelu": lambda z: 0.5 * z * (1 + np.tanh(0.7978845608 * (z + 0.044715 * z ** 3)))}[cfg.activation]
 
     def logits(self, features: np.ndarray) -> np.ndarray:
         x = features.astype(np.float32, copy=False)
+        if self.cfg.arch == "conv":
+            n = self.cfg.board_size
+            for W, b in self._layers[:-2]:
+                x = self._act(_conv3x3(x, W, b, n))
+            (Wp, bp), (Wq, bq) = self._layers[-2:]
+            flat = x.reshape(x.shape[0], -1)
+            return np.concatenate([(Wp @ flat)[0] + bp, Wq @ flat.mean(1) + bq])
         last = len(self._layers) - 1
         for k, (W, b) in enumerate(self._layers):
             x = x @ W + b
@@ -127,14 +206,15 @@ class Player:
 
     @torch.no_grad()
     def logits_torch(self, features: np.ndarray) -> np.ndarray:
-        x = torch.as_tensor(features, device=self.device).unsqueeze(0)
+        x = torch.as_tensor(np.ascontiguousarray(features), device=self.device).unsqueeze(0)
         return self.net(x)[0].cpu().numpy()
 
     def select_move(self, game: GoGame, allowed: np.ndarray, legal: np.ndarray,
                     max_moves: int, temperature: float = 0.0,
                     rng: np.random.Generator | None = None) -> int:
         """Masked argmax (temperature 0) or softmax sampling over ``allowed``."""
-        z = self.logits(encode_state(game, legal, max_moves)).astype(np.float64)
+        feats = encode_planes(game, legal) if self.cfg.arch == "conv" else encode_state(game, legal, max_moves)
+        z = self.logits(feats).astype(np.float64)
         z[~allowed] = -np.inf
         if temperature <= 0:
             return int(np.argmax(z))
@@ -144,15 +224,16 @@ class Player:
         return int(rng.choice(len(p), p=p))
 
     def __repr__(self):
-        return f"Player({self.name!r}, {self.cfg.num_layers} layers, {self.genome.size} params)"
+        return f"Player({self.name!r}, {self.cfg.arch} {self.cfg.num_layers} layers, {self.genome.size} params)"
 
 
 def layer_scales(cfg: NetConfig) -> np.ndarray:
     """Per-parameter init std (same layout as the genome) - used to scale mutations."""
     gain = _GAIN[cfg.activation]
     parts = []
-    for i, o in cfg.layer_dims():
-        parts += [np.full(i * o, gain / np.sqrt(i), np.float32), np.full(o, 0.1, np.float32)]
+    for wshape, nb, fan_in in cfg.param_shapes():
+        parts += [np.full(int(np.prod(wshape)), gain / np.sqrt(fan_in), np.float32),
+                  np.full(nb, 0.1, np.float32)]
     return np.concatenate(parts)
 
 

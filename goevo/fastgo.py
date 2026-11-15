@@ -134,6 +134,20 @@ def play_nb(board, p, color, nbr, gid, stack, lib_mark):
 
 
 @njit(cache=True)
+def liberty_map_nb(board, n, nbr, gid, nlibs, stack, lib_mark):
+    lib_mark[:] = 0
+    _group_libs(board, nbr, gid, nlibs, stack, lib_mark)
+    W = n + 2
+    out = np.zeros(n * n, dtype=np.int64)
+    for r in range(n):
+        for c in range(n):
+            p = (r + 1) * W + c + 1
+            if board[p] == BLACK or board[p] == WHITE:
+                out[r * n + c] = nlibs[gid[p]]
+    return out
+
+
+@njit(cache=True)
 def own_eye_nb(board, color, n):
     W = n + 2
     out = np.zeros(n * n, dtype=np.bool_)
@@ -244,6 +258,10 @@ class FastGo(GoGame):
             self._mask_cache = legal_mask_nb(self._b, self._to_play, self._ko, self.size, self._nbr,
                                              self._gid, self._nlibs, self._stack, self._mark)
         return self._mask_cache
+
+    def liberty_map(self):
+        return liberty_map_nb(self._b, self.size, self._nbr, self._gid, self._nlibs, self._stack,
+                              self._mark).reshape(self.size, self.size)
 
     def own_eye_mask(self):
         return own_eye_nb(self._b, self._to_play, self.size)

@@ -210,3 +210,46 @@ def test_resume_reproduces_uninterrupted_run(tmp_path):
                             net, gc, verbose=False)
     assert [h["ids"] for h in resumed] == [h["ids"] for h in full]
     assert [h["wins"] for h in resumed] == [h["wins"] for h in full]
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_liberty_map_fast_matches_python(seed):
+    from goevo.engine import liberty_map
+    from goevo.fastgo import FastGo
+    rng = np.random.default_rng(seed)
+    g = FastGo([5, 9, 13, 19][seed])
+    for _ in range(3 * g.size ** 2):
+        stones = np.flatnonzero(g.legal_mask()[:-1])
+        if not len(stones):
+            break
+        g.play(int(rng.choice(stones)))
+        np.testing.assert_array_equal(g.liberty_map(), liberty_map(g.board))
+
+
+def test_conv_net_numpy_matches_torch_and_size():
+    from goevo.player import encode_planes, random_genome, Player
+    from goevo.fastgo import FastGo
+    cfg = NetConfig(board_size=19, arch="conv", channels=16)
+    assert cfg.genome_size == 22514
+    assert NetConfig(board_size=9, arch="conv").genome_size == cfg.genome_size  # board-size independent
+    p = Player(random_genome(cfg, np.random.default_rng(1)), cfg)
+    g = FastGo(19)
+    rng = np.random.default_rng(0)
+    for _ in range(80):
+        g.play(int(rng.choice(np.flatnonzero(g.legal_mask()[:-1]))))
+    x = encode_planes(g, g.legal_mask())
+    assert x.shape == (11, 19, 19)
+    np.testing.assert_allclose(p.logits(x), p.logits_torch(x), rtol=1e-4, atol=1e-4)
+
+
+def test_conv_evolution_smoke(tmp_path):
+    from goevo import load_population
+    from goevo.evolve import EvoConfig, run_evolution
+    net = NetConfig(board_size=9, arch="conv", num_layers=3, channels=4)
+    evo = EvoConfig(pop_size=8, n_parents=2, generations=2, external_top=2, hof_games=2,
+                    bench_every=2, bench_rm_games=2, checkpoint_every=0, state_every=0,
+                    out_dir=str(tmp_path), workers=1)
+    hist = run_evolution(evo, net, GameConfig(board_size=9, backend="fast"), verbose=False)
+    assert len(hist) == 3 and hist[-1]["n_winners"] == 2
+    genomes, cfg, *_ = load_population(str(tmp_path / "gen0002.pt"))
+    assert cfg.arch == "conv" and genomes[0].size == net.genome_size
