@@ -79,7 +79,7 @@ tests/test_goevo.py
 * They beat their own generation-0 ancestors about 80% of the time (controls: 54–61%).
 * The gain levels off after ~100 generations, and the players still lose to a random mover.
 
-### Phase 2b: stronger selection (current defaults)
+### Phase 2b: stronger selection
 * 32 genomes per generation, in a **knockout bracket** (one game per match).
 * The top 8 also play a qualifier against the random mover and a **hall of fame** of past champions.
 * **Only the best 4 reproduce.** σ = 0.03.
@@ -92,11 +92,32 @@ Results after 300 generations:
 * they win 45% against a random mover (2a: 34%);
 * they are still improving.
 
+### Phase 2c: faster, bigger, longer (current defaults)
+* A compiled (numba) Go engine and numpy inference make games about 7× faster. Tests confirm the moves are identical to before.
+* **A player passes only when it has no other legal move.**
+* 64 genomes per generation, 2000 generations, knockout bracket, best 4 reproduce, σ = 0.03.
+* The qualifier is played against the hall of fame of past champions only. The random mover is used only as a yardstick.
+* Runs save `state.pt` every 25 generations and resume with `--resume`. Keep these in a git-ignored `work/` folder.
+
+Results after 2000 generations (selection run vs control run):
+* Win rate vs the random mover:
+  * selection run: **0.50 ± 0.03**, up from 0.28 for generation 0;
+  * control run: 0.39 ± 0.02;
+  * 2b champions: 0.44 ± 0.03.
+* The selection run's champions beat:
+  * the control 75% of the time;
+  * generation 0 76% of the time;
+  * the 2b champions 63% of the time.
+* Still improving slowly, about +0.1 vs the random mover per 1000 generations.
+
 Details: [`runs/report/REPORT.md`](runs/report/REPORT.md). Notebook: `notebooks/phase2_colab.ipynb`.
 
 **Checkpoints and repo size:** `*.pt` files are git-ignored. Only each run's final parents checkpoint is committed (force-added).
 Generation 0 is never stored: `goevo.evolve.initial_population` regenerates it from the seed.
 
+```bash
+python -m goevo.phase2 --generations 2000 --seed 0 --workers 2 --out work/c_sel_s0   # add --resume to continue
+```
 ```bash
 python -m goevo.phase2 --generations 300 --seed 0 --out runs/ko_sel_s0
 ```
