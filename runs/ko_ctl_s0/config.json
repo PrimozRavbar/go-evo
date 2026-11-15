@@ -1,0 +1,38 @@
+{
+ "evo": {
+  "pop_size": 32,
+  "tournament": "knockout",
+  "games_per_player": 5,
+  "n_parents": 4,
+  "generations": 300,
+  "sigma": 0.03,
+  "elitism": true,
+  "selection": "random",
+  "external_top": 8,
+  "external_weight": 1.5,
+  "hof_size": 50,
+  "seed": 0,
+  "bench_every": 10,
+  "bench_panel": 5,
+  "bench_vs_random_mover": true,
+  "checkpoint_every": 0,
+  "checkpoint_parents_only": true,
+  "out_dir": "runs/ko_ctl_s0",
+  "workers": 2
+ },
+ "net": {
+  "board_size": 19,
+  "num_layers": 10,
+  "hidden": 128,
+  "activation": "tanh"
+ },
+ "game": {
+  "board_size": 19,
+  "komi": 7.5,
+  "backend": "native",
+  "max_moves": 1083,
+  "min_moves_before_pass": 180,
+  "forbid_own_eye_fill": true,
+  "temperature": 0.0
+ }
+}
