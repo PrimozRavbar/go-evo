@@ -1,0 +1,6 @@
+numpy
+torch
+matplotlib
+ipywidgets
+pettingzoo>=1.24
+pygame  # imported by pettingzoo's classic Go env (rendering)
