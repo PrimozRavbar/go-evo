@@ -105,23 +105,49 @@ def test_mutation_no_crossover():
 
 
 @pytest.mark.parametrize("selection", ["winners", "random"])
-def test_evolution_only_winners_reproduce(tmp_path, selection):
+def test_evolution_roundrobin_winners_reproduce(tmp_path, selection):
     from goevo.evolve import EvoConfig, run_evolution
     net = NetConfig(board_size=9, hidden=16)
-    evo = EvoConfig(generations=3, bench_every=2, bench_panel=1, checkpoint_every=2,
+    evo = EvoConfig(pop_size=10, tournament="roundrobin", n_parents=0, generations=3, bench_every=2,
+                    bench_panel=1, checkpoint_every=2, checkpoint_parents_only=False,
                     out_dir=str(tmp_path), workers=1, selection=selection)
     hist = run_evolution(evo, net, GameConfig(board_size=9, backend="native"), verbose=False)
     assert len(hist) == 4
     for prev, cur in zip(hist, hist[1:]):
         assert len(cur["ids"]) == 10
         for gid, par in zip(cur["ids"], cur["parents"]):
-            if gid not in prev["ids"]:          # newborn
+            if gid not in prev["ids"]:
                 assert par in prev["winners"]   # only winners have children
-            else:                               # survivor (elitism) must be a winner
-                assert gid in prev["winners"]
-        if selection == "winners":
-            for w in prev["winners"]:
-                i = prev["ids"].index(w)
-                assert prev["wins"][i] > prev["losses"][i] or prev["n_winners"] > 0
+            else:
+                assert gid in prev["winners"]   # survivors are winners
     assert (tmp_path / "gen0000.pt").exists() and (tmp_path / "gen0003.pt").exists()
     assert "bench_mean" in hist[2]
+
+
+@pytest.mark.parametrize("selection", ["fitness", "random"])
+def test_evolution_knockout(tmp_path, selection):
+    from goevo import load_population
+    from goevo.evolve import EvoConfig, run_evolution
+    net = NetConfig(board_size=9, hidden=16)
+    evo = EvoConfig(pop_size=16, n_parents=4, generations=3, bench_every=3, bench_panel=1,
+                    external_top=4, out_dir=str(tmp_path), workers=1, selection=selection)
+    hist = run_evolution(evo, net, GameConfig(board_size=9, backend="native"), verbose=False)
+    for h in hist:
+        assert h["games"] == 15                       # single elimination: n - 1 games
+        assert sorted(h["wins"]) == [0] * 8 + [1] * 4 + [2] * 2 + [3, 4]
+        assert h["n_winners"] == 4
+        assert bool(h["qualifier"]) == (selection == "fitness")
+    for prev, cur in zip(hist, hist[1:]):
+        assert len(cur["ids"]) == 16
+        for gid, par in zip(cur["ids"], cur["parents"]):
+            assert (par in prev["winners"]) if gid not in prev["ids"] else (gid in prev["winners"])
+        born = [par for gid, par in zip(cur["ids"], cur["parents"]) if gid not in prev["ids"]]
+        assert sorted(born.count(p) for p in prev["winners"]) == [3, 3, 3, 3]
+    if selection == "fitness":  # parents are the 4 best by fitness
+        h = hist[0]
+        best = sorted(range(16), key=lambda i: -h["fitness"][i])[:4]
+        assert {h["ids"][i] for i in best} == set(h["winners"])
+    files = sorted(p.name for p in tmp_path.glob("*.pt"))
+    assert files == ["gen0003.pt"]                    # only the final checkpoint
+    genomes, *_ = load_population(str(tmp_path / "gen0003.pt"))
+    assert len(genomes) == 4                          # only the parents

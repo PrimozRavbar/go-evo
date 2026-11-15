@@ -78,10 +78,11 @@ def plot_runs(run_dirs: dict[str, str], path: str):
     import matplotlib.pyplot as plt
 
     fig, axs = plt.subplots(1, 3, figsize=(16, 4.5))
-    colors = {"sel": "#1f6fd1", "ctl": "#9a9a9a"}
+    colors = {"sel": "#1f6fd1", "ctl": "#9a9a9a", "ko_sel": "#d1561f", "ko_ctl": "#e8b28f"}
     for label, d in run_dirs.items():
         hist = load_history(d)
-        c = colors["sel" if label.startswith("sel") else "ctl"]
+        kind = ("ko_" if label.startswith("ko_") else "") + ("sel" if "sel" in label else "ctl")
+        c = colors[kind]
         ls = "-" if label.endswith("0") else "--"
         g, m = bench_curve(hist)
         axs[0].plot(g, m, ls, color=c, label=label)

@@ -1,22 +1,26 @@
-"""Phase 2: neuro-evolution of MLP Go players (mutation only, no crossover).
+"""Neuro-evolution of MLP Go players (mutation only, no crossover).
 
 Each generation:
-  1. every genome plays ``games_per_player`` games (distinct opponents, colours balanced);
-  2. *winners* = genomes with more wins than losses (fallback: the best-scoring ones);
-  3. only winners have children: the next generation is the winners themselves (elitism,
-     optional) plus Gaussian-mutated copies of winners, split evenly among them.
+  1. **Tournament** among the population:
+     * ``"knockout"`` (default): random single-elimination bracket, one game per match
+       (pop - 1 games). Rank = rounds won.
+     * ``"roundrobin"``: every genome plays ``games_per_player`` games (phase-2a scheme).
+  2. **Qualifier vs fixed opponents** (knockout only, ``external_top`` > 0): the top genomes
+     also play the uniform-random mover (both colours) and past champions from a
+     hall of fame. fitness = rounds won + ``external_weight`` * qualifier win rate.
+  3. **Selection**: only the best ``n_parents`` genomes have children (``n_parents = 0`` with
+     round robin = phase-2a rule "more wins than losses"). Parents survive (elitism) and the
+     rest of the population is Gaussian-mutated copies, split evenly among parents.
 
-Selection signal is measured against a **control run** (``selection="random"``) that is
-identical except that the "winners" are chosen at random (same number as a real run would
-pick), plus a fixed benchmark: every ``bench_every`` generations each genome plays a fixed
-panel of random genomes and a uniform-random mover with both colours.
+``selection="random"`` is the control: identical, except the parents are picked at random
+(and no qualifier games are played, since they would not influence anything).
 """
 from __future__ import annotations
 
 import json
 import os
 import time
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 
 import numpy as np
 
@@ -28,17 +32,23 @@ from .tournament import Standing, make_schedule
 
 @dataclass
 class EvoConfig:
-    pop_size: int = 10
-    games_per_player: int = 5
-    generations: int = 200
-    sigma: float = 0.1             # mutation std, relative to each layer's init std
-    elitism: bool = True           # winners survive unchanged into the next generation
-    selection: str = "winners"     # "winners" (real) | "random" (control, no selection)
+    pop_size: int = 32
+    tournament: str = "knockout"   # knockout | roundrobin
+    games_per_player: int = 5      # roundrobin only
+    n_parents: int = 4             # parents per generation (0 + roundrobin: "winning record" rule)
+    generations: int = 300
+    sigma: float = 0.03            # mutation std, relative to each layer's init std
+    elitism: bool = True           # parents survive unchanged into the next generation
+    selection: str = "fitness"     # "fitness" (real) | "random" (control). "winners" == "fitness"
+    external_top: int = 8          # top-k of the bracket play qualifier games (0 = off)
+    external_weight: float = 1.5   # weight of qualifier win rate in fitness
+    hof_size: int = 50             # hall of fame of past champions (qualifier opponents)
     seed: int = 0
-    bench_every: int = 5           # 0 = never
+    bench_every: int = 10          # 0 = never; benchmarks the parents
     bench_panel: int = 5           # fixed random genomes in the benchmark panel
     bench_vs_random_mover: bool = True
-    checkpoint_every: int = 25
+    checkpoint_every: int = 0      # 0 = only the final checkpoint
+    checkpoint_parents_only: bool = True  # save only the strongest genomes (the parents)
     out_dir: str = "runs/evo"
     workers: int | None = None
 
@@ -54,26 +64,92 @@ class Genome:
     def name(self) -> str:
         return f"#{self.id}"
 
+    @property
+    def spec(self):
+        return ("genome", self.name, self.genome)
 
-def _standings(pop, schedule, records):
+
+def initial_population(evo: EvoConfig, net_cfg: NetConfig):
+    """Generation 0 (reproducible from the seed). Returns (genomes, rng to continue with)."""
+    rng = np.random.default_rng(evo.seed)
+    pop = [Genome(i, random_genome(net_cfg, rng), None, 0) for i in range(evo.pop_size)]
+    return pop, rng
+
+
+def _record_result(st: Standing, sign: int, rec):
+    st.games += 1
+    st.margin += sign * rec.score
+    if rec.winner == 0:
+        st.draws += 1
+    elif rec.winner == sign:
+        st.wins += 1
+    else:
+        st.losses += 1
+
+
+def roundrobin(runner, pop, evo, net_cfg, game_cfg, gen):
     st = [Standing(g.name) for g in pop]
-    for (bi, wi), rec in zip(schedule, records):
-        for idx, sign in ((bi, 1), (wi, -1)):
-            s = st[idx]
-            s.games += 1
-            s.margin += sign * rec.score
-            if rec.winner == 0:
-                s.draws += 1
-            elif rec.winner == sign:
-                s.wins += 1
-            else:
-                s.losses += 1
-    return st
+    schedule = make_schedule(len(pop), evo.games_per_player, seed=evo.seed * 7919 + gen)
+    recs = runner.play([(pop[b].spec, pop[w].spec) for b, w in schedule], net_cfg, game_cfg,
+                       seed=evo.seed * 1_000_003 + gen)
+    for (bi, wi), rec in zip(schedule, recs):
+        _record_result(st[bi], 1, rec)
+        _record_result(st[wi], -1, rec)
+    return st, recs
+
+
+def knockout(runner, pop, rng, net_cfg, game_cfg, seed):
+    """Single elimination, one game per match, random colours. Odd one out gets a bye."""
+    st = [Standing(g.name) for g in pop]
+    alive = list(rng.permutation(len(pop)))
+    all_recs = []
+    rnd = 0
+    while len(alive) > 1:
+        bye = alive.pop() if len(alive) % 2 else None
+        pairs = []
+        for k in range(0, len(alive), 2):
+            a, b = alive[k], alive[k + 1]
+            if rng.random() < 0.5:
+                a, b = b, a
+            pairs.append((a, b))  # (black, white)
+        recs = runner.play([(pop[a].spec, pop[b].spec) for a, b in pairs], net_cfg, game_cfg,
+                           seed=seed * 101 + rnd)
+        nxt = []
+        for (a, b), rec in zip(pairs, recs):
+            _record_result(st[a], 1, rec)
+            _record_result(st[b], -1, rec)
+            nxt.append(a if rec.winner == 1 else b)  # komi x.5 -> no draws; draw -> white
+        if bye is not None:
+            nxt.append(bye)
+        all_recs += recs
+        alive = nxt
+        rnd += 1
+    return st, all_recs
+
+
+def qualifier(runner, cands, hof, rng, net_cfg, game_cfg, seed):
+    """Each candidate: 2 games vs random mover (both colours) + 2 vs sampled past champions."""
+    rm = spec_of(RandomPlayer("random_mover"))
+    pairs, owner = [], []
+    for i, g in cands:
+        opps = [(rm, 1), (rm, -1)]
+        if hof:
+            for k, j in enumerate(rng.choice(len(hof), size=2, replace=len(hof) < 2)):
+                opps.append((hof[j], 1 if k == 0 else -1))
+        for o, sign in opps:
+            pairs.append((g.spec, o) if sign == 1 else (o, g.spec))
+            owner.append((i, sign))
+    recs = runner.play(pairs, net_cfg, game_cfg, seed=seed)
+    score: dict[int, list[float]] = {}
+    for (i, sign), r in zip(owner, recs):
+        score.setdefault(i, []).append(1.0 if r.winner == sign else 0.5 if r.winner == 0 else 0.0)
+    return {i: float(np.mean(v)) for i, v in score.items()}
 
 
 def pick_winners(st: list[Standing]) -> list[int]:
+    """Phase-2a rule: more wins than losses (fallback: the best-scoring ones)."""
     w = [i for i, s in enumerate(st) if s.wins > s.losses]
-    if not w:  # nobody has a winning record: take those with the most points
+    if not w:
         best = max(s.points for s in st)
         w = [i for i, s in enumerate(st) if s.points == best]
     return sorted(w, key=lambda i: -st[i].fitness)
@@ -112,20 +188,20 @@ def save_checkpoint(path, pop, net_cfg, gen, extra=None):
 def run_evolution(evo: EvoConfig, net_cfg: NetConfig = NetConfig(),
                   game_cfg: GameConfig = GameConfig(), verbose: bool = True,
                   runner: GameRunner | None = None) -> list[dict]:
+    if evo.selection == "winners":
+        evo.selection = "fitness"
     os.makedirs(evo.out_dir, exist_ok=True)
     with open(os.path.join(evo.out_dir, "config.json"), "w") as f:
         json.dump({"evo": asdict(evo), "net": asdict(net_cfg), "game": asdict(game_cfg.resolved())}, f, indent=1)
-    rng = np.random.default_rng(evo.seed)
     scales = layer_scales(net_cfg)
-    next_id = 0
-    pop = []
-    for _ in range(evo.pop_size):
-        pop.append(Genome(next_id, random_genome(net_cfg, rng), None, 0))
-        next_id += 1
+    pop, rng = initial_population(evo, net_cfg)
+    next_id = len(pop)
+    real = evo.selection == "fitness"
 
     panel = [spec_of(p) for p in make_panel(net_cfg, evo.bench_panel)]
     if evo.bench_vs_random_mover:
         panel.append(spec_of(RandomPlayer("random_mover")))
+    hof: list[tuple] = []  # specs of past champions
 
     own_runner = runner is None
     runner = runner or GameRunner(evo.workers)
@@ -136,14 +212,35 @@ def run_evolution(evo: EvoConfig, net_cfg: NetConfig = NetConfig(),
     try:
         for gen in range(evo.generations + 1):
             t0 = time.time()
-            specs = [("genome", g.name, g.genome) for g in pop]
-            schedule = make_schedule(len(pop), evo.games_per_player, seed=evo.seed * 7919 + gen)
-            recs = runner.play([(specs[b], specs[w]) for b, w in schedule], net_cfg, game_cfg,
-                               seed=evo.seed * 1_000_003 + gen)
-            st = _standings(pop, schedule, recs)
-            winners = pick_winners(st)
-            if evo.selection == "random":
-                winners = sorted(rng.choice(len(pop), size=len(winners), replace=False).tolist())
+            game_seed = evo.seed * 1_000_003 + gen
+            if evo.tournament == "knockout":
+                st, recs = knockout(runner, pop, rng, net_cfg, game_cfg, game_seed)
+            else:
+                st, recs = roundrobin(runner, pop, evo, net_cfg, game_cfg, gen)
+
+            # fitness: tournament points (+ qualifier vs fixed opponents for the top-k)
+            fit = np.array([s.fitness for s in st])
+            qual = {}
+            if real and evo.tournament == "knockout" and evo.external_top > 0:
+                top = list(np.argsort(-fit, kind="stable")[: evo.external_top])
+                qual = qualifier(runner, [(int(i), pop[i]) for i in top], hof, rng, net_cfg,
+                                 game_cfg, game_seed + 7)
+                for i, q in qual.items():
+                    fit[i] += evo.external_weight * q
+            order = [int(i) for i in np.argsort(-fit, kind="stable")]
+
+            if evo.n_parents > 0:
+                n_par = evo.n_parents
+                parents_idx = order[:n_par]
+            else:  # phase-2a rule
+                parents_idx = pick_winners(st)
+                n_par = len(parents_idx)
+            if not real:
+                parents_idx = sorted(rng.choice(len(pop), size=n_par, replace=False).tolist())
+            if real:
+                hof.append(pop[order[0]].spec)
+                if len(hof) > evo.hof_size:  # keep the first champion, drop a random other one
+                    hof.pop(int(rng.integers(1, len(hof))))
 
             h = {
                 "gen": gen,
@@ -151,46 +248,55 @@ def run_evolution(evo: EvoConfig, net_cfg: NetConfig = NetConfig(),
                 "parents": [g.parent for g in pop],
                 "wins": [s.wins for s in st],
                 "losses": [s.losses for s in st],
-                "margin": [s.margin / max(s.games, 1) for s in st],
-                "winners": [pop[i].id for i in winners],
-                "n_winners": len(winners),
+                "fitness": [float(x) for x in fit],
+                "qualifier": {pop[i].id: q for i, q in qual.items()},
+                "winners": [pop[i].id for i in parents_idx],
+                "n_winners": len(parents_idx),
+                "games": len(recs),
                 "mean_moves": float(np.mean([len(r.moves) for r in recs])),
                 "black_win_rate": float(np.mean([r.winner == 1 for r in recs])),
                 "mean_abs_score": float(np.mean([abs(r.score) for r in recs])),
                 "truncated": int(sum(r.truncated for r in recs)),
                 "mean_age": float(np.mean([gen - g.born for g in pop])),
             }
+            if qual:
+                h["qualifier_mean"] = float(np.mean(list(qual.values())))
 
             if evo.bench_every and gen % evo.bench_every == 0:
+                specs = [pop[i].spec for i in parents_idx]
                 wr, by_opp = benchmark(runner, specs, panel, net_cfg, game_cfg, seed=gen)
                 h["bench_winrate"] = wr.tolist()
                 h["bench_mean"] = float(wr.mean())
                 h["bench_best"] = float(wr.max())
                 h["bench_by_opp"] = by_opp
 
-            if evo.checkpoint_every and (gen % evo.checkpoint_every == 0 or gen == evo.generations):
-                save_checkpoint(os.path.join(evo.out_dir, f"gen{gen:04d}.pt"), pop, net_cfg, gen,
-                                {"wins": h["wins"]})
+            last = gen == evo.generations
+            if last or (evo.checkpoint_every and gen % evo.checkpoint_every == 0):
+                idx = list(parents_idx) if evo.checkpoint_parents_only else list(range(len(pop)))
+                save_checkpoint(os.path.join(evo.out_dir, f"gen{gen:04d}.pt"), [pop[i] for i in idx],
+                                net_cfg, gen, {"fitness": [float(fit[i]) for i in idx],
+                                 "selection": evo.selection})
 
             h["seconds"] = time.time() - t0
             history.append(h)
             with open(hist_path, "a") as f:
                 f.write(json.dumps(h) + "\n")
             if verbose:
-                b = f" bench mean={h['bench_mean']:.3f} best={h['bench_best']:.3f}" if "bench_mean" in h else ""
-                print(f"[{evo.selection}] gen {gen:4d} winners={len(winners):2d} "
-                      f"moves={h['mean_moves']:.0f} age={h['mean_age']:.1f}{b} ({h['seconds']:.1f}s)",
+                q = f" qual={h['qualifier_mean']:.2f}" if "qualifier_mean" in h else ""
+                b = f" bench={h['bench_mean']:.3f} (rm {h['bench_by_opp'].get('random_mover', float('nan')):.2f})" \
+                    if "bench_mean" in h else ""
+                print(f"[{evo.selection}] gen {gen:4d} parents={len(parents_idx)} games={len(recs)} "
+                      f"moves={h['mean_moves']:.0f} age={h['mean_age']:.1f}{q}{b} ({h['seconds']:.1f}s)",
                       flush=True)
-
-            if gen == evo.generations:
+            if last:
                 break
-            # --- reproduction: only winners have children, mutation only ---
-            parents = [pop[i] for i in winners]
+
+            # --- reproduction: only parents have children, mutation only ---
+            parents = [pop[i] for i in parents_idx]
             new_pop = list(parents) if evo.elitism else []
             k = 0
-            order = list(rng.permutation(len(parents)))
             while len(new_pop) < evo.pop_size:
-                par = parents[order[k % len(parents)]]
+                par = parents[k % len(parents)]
                 new_pop.append(Genome(next_id, mutate(par.genome, net_cfg, evo.sigma, rng, scales),
                                       par.id, gen + 1))
                 next_id += 1
