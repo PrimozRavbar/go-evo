@@ -61,18 +61,25 @@ def _frame_title(rec: GameRecord, i: int) -> str:
     return t
 
 
-def animate_game(rec: GameRecord, interval_ms: int = 300):
-    """Return an HTML animation (with play/pause/step controls) — display it in Colab."""
+def animate_game(rec: GameRecord, interval_ms: int = 300, every: int = 1, dpi: int = 60):
+    """Return an HTML animation (with play/pause/step controls) — display it in Colab.
+
+    ``every`` shows only every k-th position (useful for long 19x19 games)."""
+    import matplotlib
     import matplotlib.pyplot as plt
     from matplotlib import animation
     from IPython.display import HTML
 
-    fig, ax = plt.subplots(figsize=(5, 5))
+    matplotlib.rcParams["animation.embed_limit"] = 200  # MB; 19x19 games have hundreds of frames
+    fig, ax = plt.subplots(figsize=(6, 6), dpi=dpi)
+    frames = list(range(0, len(rec.boards), every))
+    if frames[-1] != len(rec.boards) - 1:
+        frames.append(len(rec.boards) - 1)
 
     def update(i):
         draw_board(rec.boards[i], ax, rec.moves[i - 1] if i else None, _frame_title(rec, i))
 
-    anim = animation.FuncAnimation(fig, update, frames=len(rec.boards), interval=interval_ms)
+    anim = animation.FuncAnimation(fig, update, frames=frames, interval=interval_ms)
     html = HTML(anim.to_jshtml())
     plt.close(fig)
     return html

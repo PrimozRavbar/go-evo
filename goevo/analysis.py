@@ -32,9 +32,7 @@ def survivor_advantage(hist):
     out = []
     for h in hist[1:]:
         g = h["gen"]
-        born_now = [p is not None and i not in () for i, p in enumerate(h["parents"])]
         surv, new = [], []
-        # newborn = parent is not None and was created this generation -> id not in previous ids
         prev = set(hist[g - 1]["ids"])
         for gid, w, l in zip(h["ids"], h["wins"], h["losses"]):
             frac = w / max(w + l, 1)

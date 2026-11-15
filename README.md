@@ -11,7 +11,7 @@ The players play each other, and the results are used as fitness.
 * **Own engine as fallback:** `goevo.engine.NativeGo`, in pure numpy. It is used automatically when PettingZoo can't be imported.
   It has the same rules: area scoring with komi, suicide illegal, simple ko, game ends after two passes.
   `tests/` plays 20 random games on both engines and checks that they agree on every legal-move mask, every board and the final score.
-* **Players:** `NetConfig(board_size=9, num_layers=10, hidden=128)` gives 10 Linear layers with tanh, about 184k parameters per genome.
+* **Players:** `NetConfig(num_layers=10, hidden=128)` gives 10 Linear layers with tanh: about 364k parameters per genome on 19×19 (about 184k on 9×9).
   * Input (from the side to move): own stones, opponent stones, empty points, legal points, plus game progress.
   * Output: 82 logits (81 points + pass). The move is a masked argmax, or softmax sampling if `temperature > 0`.
 * **Tournament:** 10 random genomes, each plays 5 headless games.
@@ -53,9 +53,34 @@ goevo/match.py       play_game -> GameRecord (moves, boards, score, SGF)
 goevo/tournament.py  population, pairing schedule, standings/fitness
 goevo/viz.py         board drawing, animation, slider, live view, ASCII replay
 goevo/phase1.py      CLI for phase 1
+goevo/evolve.py      phase 2 evolution loop (winners-only reproduction, mutation)
+goevo/parallel.py    multiprocess game runner
+goevo/analysis.py    selection-signal analysis (benchmark, survivor advantage, head-to-head)
+goevo/phase2.py      CLI for phase 2
+runs/                phase 2 runs: checkpoints, histories, report
 notebooks/phase1_colab.ipynb
+notebooks/phase2_colab.ipynb
 tests/test_goevo.py
 ```
 
-## Next (phase 2)
-Selection plus mutation/crossover on the flat genomes. A tournament per generation gives the fitness.
+## Phase 2 (done): evolution on 19×19
+
+* The default board is now **19×19** (move cap 3·N² = 1083).
+* Each generation, every genome plays 5 games as in phase 1.
+* **Only winners** (more wins than losses) have children: Gaussian mutation, **no crossover**. Winners survive (elitism).
+* Control runs (`--selection random`) choose parents at random, to check whether selection is really doing anything.
+* Fixed benchmark panel (random genomes + uniform-random mover) every 10 generations. Checkpoints every 50 generations.
+
+**Result: there is a selection signal.**
+* After 300 generations, the selected populations beat the control populations 68–83% of the time.
+* They beat their own generation-0 ancestors about 80% of the time (controls: 54–61%).
+* The gain levels off after ~100 generations, and the players still lose to a random mover.
+
+Details: [`runs/report/REPORT.md`](runs/report/REPORT.md). Notebook: `notebooks/phase2_colab.ipynb`.
+
+```bash
+python -m goevo.phase2 --generations 300 --selection winners --seed 0 --out runs/sel_s0
+```
+```bash
+python -m goevo.phase2 --generations 300 --selection random --seed 0 --out runs/ctl_s0
+```
