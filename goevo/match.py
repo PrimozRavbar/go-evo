@@ -14,7 +14,8 @@ class GameConfig:
     komi: float = 7.5
     backend: str = "auto"          # auto | pettingzoo | native
     max_moves: int | None = None   # hard cap; default 3 * N * N (1083 on 19x19, 243 on 9x9)
-    min_moves_before_pass: int | None = None  # pass masked before this; default N*N//2
+    pass_rule: str = "forced"      # "forced": pass only if no other move | "after_min": pass allowed after min_moves_before_pass
+    min_moves_before_pass: int | None = None  # only for pass_rule="after_min"; default N*N//2
     forbid_own_eye_fill: bool = True  # never fill your own single-point eye
     temperature: float = 0.0       # 0 = deterministic argmax
 
@@ -22,6 +23,7 @@ class GameConfig:
         n2 = self.board_size ** 2
         return GameConfig(self.board_size, self.komi, self.backend,
                           self.max_moves if self.max_moves is not None else 3 * n2,
+                          self.pass_rule,
                           self.min_moves_before_pass if self.min_moves_before_pass is not None else n2 // 2,
                           self.forbid_own_eye_fill, self.temperature)
 
@@ -115,10 +117,13 @@ def play_game(black, white, cfg: GameConfig = GameConfig(), rng: np.random.Gener
         legal = game.legal_mask()
         allowed = legal.copy()
         if cfg.forbid_own_eye_fill:
-            allowed[:-1] &= ~own_eye_mask(game)
+            eyes = game.own_eye_mask() if hasattr(game, "own_eye_mask") else own_eye_mask(game)
+            allowed[:-1] &= ~eyes
         stone_moves = allowed[:-1].any()
-        # Pass is only an option late enough in the game, or when nothing else is possible.
-        allowed[-1] = (game.move_number >= cfg.min_moves_before_pass) or not stone_moves
+        if cfg.pass_rule == "forced":  # pass only when nothing else is possible
+            allowed[-1] = not stone_moves
+        else:  # pass allowed late enough in the game
+            allowed[-1] = (game.move_number >= cfg.min_moves_before_pass) or not stone_moves
         if not allowed.any():
             allowed[-1] = True
         a = players[game.to_play].select_move(game, allowed, legal, cfg.max_moves,

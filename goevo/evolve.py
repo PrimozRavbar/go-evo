@@ -5,9 +5,11 @@ Each generation:
      * ``"knockout"`` (default): random single-elimination bracket, one game per match
        (pop - 1 games). Rank = rounds won.
      * ``"roundrobin"``: every genome plays ``games_per_player`` games (phase-2a scheme).
-  2. **Qualifier vs fixed opponents** (knockout only, ``external_top`` > 0): the top genomes
-     also play the uniform-random mover (both colours) and past champions from a
-     hall of fame. fitness = rounds won + ``external_weight`` * qualifier win rate.
+  2. **Qualifier vs past champions** (knockout only, ``external_top`` > 0): the top genomes
+     also play ``hof_games`` games against champions of earlier generations (hall of fame;
+     prevents cycling / forgetting). fitness = rounds won + ``external_weight`` * qualifier
+     win rate. (The uniform-random mover is only a yardstick, not part of fitness, unless
+     ``qualifier_vs_random_mover`` is set.)
   3. **Selection**: only the best ``n_parents`` genomes have children (``n_parents = 0`` with
      round robin = phase-2a rule "more wins than losses"). Parents survive (elitism) and the
      rest of the population is Gaussian-mutated copies, split evenly among parents.
@@ -32,23 +34,28 @@ from .tournament import Standing, make_schedule
 
 @dataclass
 class EvoConfig:
-    pop_size: int = 32
+    pop_size: int = 64
     tournament: str = "knockout"   # knockout | roundrobin
     games_per_player: int = 5      # roundrobin only
     n_parents: int = 4             # parents per generation (0 + roundrobin: "winning record" rule)
-    generations: int = 300
+    generations: int = 1000
     sigma: float = 0.03            # mutation std, relative to each layer's init std
     elitism: bool = True           # parents survive unchanged into the next generation
     selection: str = "fitness"     # "fitness" (real) | "random" (control). "winners" == "fitness"
     external_top: int = 8          # top-k of the bracket play qualifier games (0 = off)
     external_weight: float = 1.5   # weight of qualifier win rate in fitness
     hof_size: int = 50             # hall of fame of past champions (qualifier opponents)
+    hof_games: int = 4             # qualifier games vs past champions (half black, half white)
+    qualifier_vs_random_mover: bool = False
     seed: int = 0
     bench_every: int = 10          # 0 = never; benchmarks the parents
-    bench_panel: int = 5           # fixed random genomes in the benchmark panel
+    bench_panel: int = 0           # fixed random genomes in the benchmark panel
     bench_vs_random_mover: bool = True
-    checkpoint_every: int = 0      # 0 = only the final checkpoint
+    bench_rm_games: int = 24       # games per parent vs the random mover
+    checkpoint_every: int = 250    # parents-only checkpoints (0 = only the final one)
     checkpoint_parents_only: bool = True  # save only the strongest genomes (the parents)
+    state_every: int = 25          # resumable full state (state.pt, overwritten; not for git)
+    resume: bool = False           # continue from out_dir/state.pt if it exists
     out_dir: str = "runs/evo"
     workers: int | None = None
 
@@ -127,18 +134,24 @@ def knockout(runner, pop, rng, net_cfg, game_cfg, seed):
     return st, all_recs
 
 
-def qualifier(runner, cands, hof, rng, net_cfg, game_cfg, seed):
-    """Each candidate: 2 games vs random mover (both colours) + 2 vs sampled past champions."""
+def qualifier(runner, cands, hof, rng, net_cfg, game_cfg, seed, hof_games=4, vs_random_mover=False):
+    """Each candidate plays ``hof_games`` vs sampled past champions (both colours) and,
+    optionally, 2 games vs the random mover. Returns {index: win rate}."""
     rm = spec_of(RandomPlayer("random_mover"))
     pairs, owner = [], []
     for i, g in cands:
-        opps = [(rm, 1), (rm, -1)]
-        if hof:
-            for k, j in enumerate(rng.choice(len(hof), size=2, replace=len(hof) < 2)):
-                opps.append((hof[j], 1 if k == 0 else -1))
+        opps = [(rm, 1), (rm, -1)] if vs_random_mover else []
+        if hof and hof_games > 0:
+            n_ch = max(1, hof_games // 2)
+            for j in rng.choice(len(hof), size=n_ch, replace=len(hof) < n_ch):
+                opps += [(hof[j], 1), (hof[j], -1)]
+        if not opps:
+            continue
         for o, sign in opps:
             pairs.append((g.spec, o) if sign == 1 else (o, g.spec))
             owner.append((i, sign))
+    if not pairs:
+        return {}
     recs = runner.play(pairs, net_cfg, game_cfg, seed=seed)
     score: dict[int, list[float]] = {}
     for (i, sign), r in zip(owner, recs):
@@ -198,19 +211,31 @@ def run_evolution(evo: EvoConfig, net_cfg: NetConfig = NetConfig(),
     next_id = len(pop)
     real = evo.selection == "fitness"
 
-    panel = [spec_of(p) for p in make_panel(net_cfg, evo.bench_panel)]
+    panel = [spec_of(p) for p in make_panel(net_cfg, evo.bench_panel)] if evo.bench_panel else []
     if evo.bench_vs_random_mover:
-        panel.append(spec_of(RandomPlayer("random_mover")))
+        panel += [spec_of(RandomPlayer("random_mover"))] * max(1, evo.bench_rm_games // 2)
     hof: list[tuple] = []  # specs of past champions
+
+    history: list[dict] = []
+    hist_path = os.path.join(evo.out_dir, "history.jsonl")
+    state_path = os.path.join(evo.out_dir, "state.pt")
+    start_gen = 0
+    if evo.resume and os.path.exists(state_path):
+        st0 = load_state(state_path)
+        pop, hof, next_id, start_gen = st0["pop"], st0["hof"], st0["next_id"], st0["next_gen"]
+        rng.bit_generator.state = st0["rng"]
+        history = [h for h in load_history(evo.out_dir) if h["gen"] < start_gen]
+        if verbose:
+            print(f"resumed from {state_path} at generation {start_gen}")
+    with open(hist_path, "w") as f:
+        for h in history:
+            f.write(json.dumps(h) + "\n")
 
     own_runner = runner is None
     runner = runner or GameRunner(evo.workers)
-    history: list[dict] = []
-    hist_path = os.path.join(evo.out_dir, "history.jsonl")
-    open(hist_path, "w").close()
     t_start = time.time()
     try:
-        for gen in range(evo.generations + 1):
+        for gen in range(start_gen, evo.generations + 1):
             t0 = time.time()
             game_seed = evo.seed * 1_000_003 + gen
             if evo.tournament == "knockout":
@@ -224,7 +249,7 @@ def run_evolution(evo: EvoConfig, net_cfg: NetConfig = NetConfig(),
             if real and evo.tournament == "knockout" and evo.external_top > 0:
                 top = list(np.argsort(-fit, kind="stable")[: evo.external_top])
                 qual = qualifier(runner, [(int(i), pop[i]) for i in top], hof, rng, net_cfg,
-                                 game_cfg, game_seed + 7)
+                                 game_cfg, game_seed + 7, evo.hof_games, evo.qualifier_vs_random_mover)
                 for i, q in qual.items():
                     fit[i] += evo.external_weight * q
             order = [int(i) for i in np.argsort(-fit, kind="stable")]
@@ -302,12 +327,32 @@ def run_evolution(evo: EvoConfig, net_cfg: NetConfig = NetConfig(),
                 next_id += 1
                 k += 1
             pop = new_pop[: evo.pop_size]
+            if evo.state_every and (gen + 1) % evo.state_every == 0:
+                save_state(state_path, pop, hof, next_id, gen + 1, rng)
     finally:
         if own_runner:
             runner.close()
     if verbose:
         print(f"done in {(time.time() - t_start) / 60:.1f} min -> {evo.out_dir}")
     return history
+
+
+def save_state(path, pop, hof, next_id, next_gen, rng):
+    """Everything needed to resume (overwritten in place; git-ignored)."""
+    import torch
+    tmp = path + ".tmp"
+    torch.save({"pop": [(g.id, g.genome, g.parent, g.born) for g in pop],
+                "hof": [(h[1], h[2]) for h in hof], "next_id": next_id, "next_gen": next_gen,
+                "rng": rng.bit_generator.state}, tmp)
+    os.replace(tmp, path)
+
+
+def load_state(path):
+    import torch
+    d = torch.load(path, weights_only=False)
+    return {"pop": [Genome(i, g, p, b) for i, g, p, b in d["pop"]],
+            "hof": [("genome", n, g) for n, g in d["hof"]],
+            "next_id": d["next_id"], "next_gen": d["next_gen"], "rng": d["rng"]}
 
 
 def load_history(out_dir: str) -> list[dict]:

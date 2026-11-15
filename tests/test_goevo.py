@@ -109,7 +109,8 @@ def test_evolution_roundrobin_winners_reproduce(tmp_path, selection):
     from goevo.evolve import EvoConfig, run_evolution
     net = NetConfig(board_size=9, hidden=16)
     evo = EvoConfig(pop_size=10, tournament="roundrobin", n_parents=0, generations=3, bench_every=2,
-                    bench_panel=1, checkpoint_every=2, checkpoint_parents_only=False,
+                    bench_panel=1, bench_rm_games=2, checkpoint_every=2, checkpoint_parents_only=False,
+                    state_every=0,
                     out_dir=str(tmp_path), workers=1, selection=selection)
     hist = run_evolution(evo, net, GameConfig(board_size=9, backend="native"), verbose=False)
     assert len(hist) == 4
@@ -130,13 +131,15 @@ def test_evolution_knockout(tmp_path, selection):
     from goevo.evolve import EvoConfig, run_evolution
     net = NetConfig(board_size=9, hidden=16)
     evo = EvoConfig(pop_size=16, n_parents=4, generations=3, bench_every=3, bench_panel=1,
-                    external_top=4, out_dir=str(tmp_path), workers=1, selection=selection)
+                    bench_rm_games=2, external_top=4, checkpoint_every=0, state_every=0,
+                    out_dir=str(tmp_path), workers=1, selection=selection)
     hist = run_evolution(evo, net, GameConfig(board_size=9, backend="native"), verbose=False)
     for h in hist:
         assert h["games"] == 15                       # single elimination: n - 1 games
         assert sorted(h["wins"]) == [0] * 8 + [1] * 4 + [2] * 2 + [3, 4]
         assert h["n_winners"] == 4
-        assert bool(h["qualifier"]) == (selection == "fitness")
+        # qualifier = games vs hall of fame, which is empty in generation 0
+        assert bool(h["qualifier"]) == (selection == "fitness" and h["gen"] > 0)
     for prev, cur in zip(hist, hist[1:]):
         assert len(cur["ids"]) == 16
         for gid, par in zip(cur["ids"], cur["parents"]):
@@ -151,3 +154,59 @@ def test_evolution_knockout(tmp_path, selection):
     assert files == ["gen0003.pt"]                    # only the final checkpoint
     genomes, *_ = load_population(str(tmp_path / "gen0003.pt"))
     assert len(genomes) == 4                          # only the parents
+
+
+@pytest.mark.parametrize("seed", range(16))
+def test_fast_engine_matches_native(seed):
+    from goevo.fastgo import FastGo
+    from goevo.match import own_eye_mask
+    rng = np.random.default_rng(100 + seed)
+    size = [5, 9, 13, 19][seed % 4]
+    a, b = NativeGo(size, 7.5), FastGo(size, 7.5)
+    for _ in range(5 * size * size):
+        if a.is_over():
+            break
+        ma, mb = a.legal_mask(), b.legal_mask()
+        np.testing.assert_array_equal(ma, mb)
+        np.testing.assert_array_equal(own_eye_mask(a), b.own_eye_mask())
+        stones = np.flatnonzero(ma[:-1])
+        mv = a.pass_action if (len(stones) == 0 or rng.random() < 0.02) else int(rng.choice(stones))
+        a.play(mv)
+        b.play(mv)
+        np.testing.assert_array_equal(a.board, b.board)
+        assert a.is_over() == b.is_over()
+        assert a.score() == b.score()
+
+
+def test_numpy_forward_matches_torch():
+    from goevo.player import encode_state
+    from goevo.fastgo import FastGo
+    cfg = NetConfig(board_size=19)
+    p = random_population(1, cfg, seed=3)[0]
+    g = FastGo(19)
+    x = encode_state(g, g.legal_mask(), 1083)
+    np.testing.assert_allclose(p.logits(x), p.logits_torch(x), rtol=1e-4, atol=1e-4)
+
+
+def test_forced_pass_rule():
+    from goevo.player import RandomPlayer
+    rec = play_game(RandomPlayer("a"), RandomPlayer("b"), GameConfig(board_size=9, backend="fast"),
+                    np.random.default_rng(0))
+    n = 81
+    # with pass_rule="forced" the only passes are the final ones (nothing else possible)
+    passes = [i for i, m in enumerate(rec.moves) if m == n]
+    assert passes and passes[-1] == len(rec.moves) - 1
+    assert all(i >= len(rec.moves) - 3 or rec.moves[i + 1] != n for i in passes[:-2])
+
+
+def test_resume_reproduces_uninterrupted_run(tmp_path):
+    from goevo.evolve import EvoConfig, run_evolution
+    net = NetConfig(board_size=9, hidden=16)
+    gc = GameConfig(board_size=9, backend="fast")
+    kw = dict(pop_size=8, n_parents=2, bench_every=0, checkpoint_every=0, state_every=2, workers=1)
+    full = run_evolution(EvoConfig(generations=5, out_dir=str(tmp_path / "a"), **kw), net, gc, verbose=False)
+    run_evolution(EvoConfig(generations=3, out_dir=str(tmp_path / "b"), **kw), net, gc, verbose=False)
+    resumed = run_evolution(EvoConfig(generations=5, out_dir=str(tmp_path / "b"), resume=True, **kw),
+                            net, gc, verbose=False)
+    assert [h["ids"] for h in resumed] == [h["ids"] for h in full]
+    assert [h["wins"] for h in resumed] == [h["wins"] for h in full]

@@ -94,13 +94,39 @@ class Player:
         self.cfg = cfg
         self.name = name
         self.device = device
-        self.net = build_net(cfg).to(device).eval()
-        torch.nn.utils.vector_to_parameters(
-            torch.as_tensor(genome, dtype=torch.float32, device=device),
-            self.net.parameters())
+        self._net = None  # torch module, built lazily (only needed for logits_torch / export)
+        # numpy copies of the weights: for batch-1 inference numpy is much faster than torch
+        self._layers = []
+        off = 0
+        for i, o in cfg.layer_dims():
+            W = genome[off:off + i * o].reshape(o, i).T.copy()
+            off += i * o
+            b = genome[off:off + o]
+            off += o
+            self._layers.append((W, b))
+        self._act = {"tanh": np.tanh, "relu": lambda z: np.maximum(z, 0),
+                     "gelu": lambda z: 0.5 * z * (1 + np.tanh(0.7978845608 * (z + 0.044715 * z ** 3)))}[cfg.activation]
+
+    def logits(self, features: np.ndarray) -> np.ndarray:
+        x = features.astype(np.float32, copy=False)
+        last = len(self._layers) - 1
+        for k, (W, b) in enumerate(self._layers):
+            x = x @ W + b
+            if k < last:
+                x = self._act(x)
+        return x
+
+    @property
+    def net(self) -> nn.Sequential:
+        if self._net is None:
+            self._net = build_net(self.cfg).to(self.device).eval()
+            torch.nn.utils.vector_to_parameters(
+                torch.as_tensor(self.genome, dtype=torch.float32, device=self.device),
+                self._net.parameters())
+        return self._net
 
     @torch.no_grad()
-    def logits(self, features: np.ndarray) -> np.ndarray:
+    def logits_torch(self, features: np.ndarray) -> np.ndarray:
         x = torch.as_tensor(features, device=self.device).unsqueeze(0)
         return self.net(x)[0].cpu().numpy()
 
