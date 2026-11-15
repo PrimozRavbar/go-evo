@@ -21,7 +21,7 @@ NUM_FEATURE_PLANES = 4  # own stones, opponent stones, empty, legal-for-me
 
 @dataclass
 class NetConfig:
-    board_size: int = 9
+    board_size: int = 19
     num_layers: int = 10       # number of Linear layers (input + hidden + output)
     hidden: int = 128          # width of every hidden layer
     activation: str = "tanh"   # tanh | relu | gelu
@@ -119,6 +119,35 @@ class Player:
 
     def __repr__(self):
         return f"Player({self.name!r}, {self.cfg.num_layers} layers, {self.genome.size} params)"
+
+
+def layer_scales(cfg: NetConfig) -> np.ndarray:
+    """Per-parameter init std (same layout as the genome) - used to scale mutations."""
+    gain = _GAIN[cfg.activation]
+    parts = []
+    for i, o in cfg.layer_dims():
+        parts += [np.full(i * o, gain / np.sqrt(i), np.float32), np.full(o, 0.1, np.float32)]
+    return np.concatenate(parts)
+
+
+def mutate(genome: np.ndarray, cfg: NetConfig, sigma: float, rng: np.random.Generator,
+           scales: np.ndarray | None = None) -> np.ndarray:
+    """Gaussian mutation; noise std = sigma * (init std of that layer). No crossover."""
+    if scales is None:
+        scales = layer_scales(cfg)
+    noise = rng.standard_normal(genome.size, dtype=np.float32)
+    return (genome + sigma * scales * noise).astype(np.float32)
+
+
+class RandomPlayer:
+    """Baseline: uniform random over the allowed moves (same rules as the networks)."""
+
+    def __init__(self, name: str = "random"):
+        self.name = name
+
+    def select_move(self, game, allowed, legal, max_moves, temperature=0.0, rng=None):
+        rng = rng or np.random.default_rng()
+        return int(rng.choice(np.flatnonzero(allowed)))
 
 
 def save_population(path: str, genomes: list[np.ndarray], cfg: NetConfig, names: list[str],

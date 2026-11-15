@@ -183,18 +183,47 @@ class NativeGo(GoGame):
                 return None  # suicide
         return b, captured
 
+    def _group_libs(self):
+        """Label every group once: returns (group_id board, {gid: liberty count})."""
+        b = self._board
+        gid = -np.ones(b.shape, dtype=np.int32)
+        nlibs = {}
+        k = 0
+        for r, c in np.argwhere(b != EMPTY):
+            p = (int(r), int(c))
+            if gid[p] >= 0:
+                continue
+            group, libs = self._group(b, p)
+            for q in group:
+                gid[q] = k
+            nlibs[k] = len(libs)
+            k += 1
+        return gid, nlibs
+
     def legal_mask(self):
         n = self.size
+        b = self._board
+        me = self._to_play
         mask = np.zeros(n * n + 1, dtype=bool)
         mask[-1] = True
-        empties = np.argwhere(self._board == EMPTY)
-        for r, c in empties:
-            p = (int(r), int(c))
-            # fast path: an empty neighbour means it's legal (unless ko point)
-            if p != self._ko and any(self._board[nb] == EMPTY for nb in self._nbrs[p]):
-                mask[r * n + c] = True
-            elif self._try(p, self._to_play) is not None:
-                mask[r * n + c] = True
+        mask[:-1] = (b == EMPTY).ravel()
+        # Points with no empty neighbour may be suicide; check those against group liberties.
+        pad = np.ones((n + 2, n + 2), dtype=bool)
+        pad[1:-1, 1:-1] = b != EMPTY
+        surrounded = (b == EMPTY) & pad[:-2, 1:-1] & pad[2:, 1:-1] & pad[1:-1, :-2] & pad[1:-1, 2:]
+        if surrounded.any():
+            gid, nlibs = self._group_libs()
+            for r, c in np.argwhere(surrounded):
+                p = (int(r), int(c))
+                ok = False
+                for nb in self._nbrs[p]:
+                    libs = nlibs[gid[nb]]
+                    if (b[nb] == me and libs > 1) or (b[nb] == -me and libs == 1):
+                        ok = True
+                        break
+                mask[r * n + c] = ok
+        if self._ko is not None:
+            mask[self._ko[0] * n + self._ko[1]] = False
         return mask
 
     def play(self, action):

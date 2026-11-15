@@ -1,0 +1,32 @@
+{
+ "evo": {
+  "pop_size": 10,
+  "games_per_player": 5,
+  "generations": 300,
+  "sigma": 0.1,
+  "elitism": true,
+  "selection": "winners",
+  "seed": 1,
+  "bench_every": 10,
+  "bench_panel": 5,
+  "bench_vs_random_mover": true,
+  "checkpoint_every": 50,
+  "out_dir": "runs/sel_s1",
+  "workers": 1
+ },
+ "net": {
+  "board_size": 19,
+  "num_layers": 10,
+  "hidden": 128,
+  "activation": "tanh"
+ },
+ "game": {
+  "board_size": 19,
+  "komi": 7.5,
+  "backend": "native",
+  "max_moves": 1083,
+  "min_moves_before_pass": 180,
+  "forbid_own_eye_fill": true,
+  "temperature": 0.0
+ }
+}

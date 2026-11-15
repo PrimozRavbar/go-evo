@@ -19,7 +19,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--pop", type=int, default=10)
     ap.add_argument("--games", type=int, default=5, help="games per player")
-    ap.add_argument("--size", type=int, default=9)
+    ap.add_argument("--size", type=int, default=19)
     ap.add_argument("--komi", type=float, default=7.5)
     ap.add_argument("--layers", type=int, default=10)
     ap.add_argument("--hidden", type=int, default=128)

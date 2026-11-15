@@ -54,7 +54,7 @@ def test_phase1_tournament_runs(backend):
     from goevo import run_tournament
     cfg = NetConfig(board_size=9, num_layers=10, hidden=32)
     players = random_population(10, cfg, seed=1)
-    res = run_tournament(players, 5, GameConfig(backend=backend), verbose=False)
+    res = run_tournament(players, 5, GameConfig(board_size=9, backend=backend), verbose=False)
     assert len(res.records) == 25
     assert all(s.games == 5 for s in res.standings)
 
@@ -65,7 +65,7 @@ def test_native_matches_pettingzoo(seed):
     """Random games: both engines must agree on legal moves, boards and final score."""
     from goevo import PettingZooGo
     rng = np.random.default_rng(seed)
-    size = [5, 7, 9][seed % 3]
+    size = [5, 7, 9, 19][seed % 4]
     a, b = NativeGo(size, 7.5), PettingZooGo(size, 7.5)
     for _ in range(4 * size * size):
         if a.is_over():
@@ -84,6 +84,44 @@ def test_native_matches_pettingzoo(seed):
 def test_game_record_and_sgf():
     cfg = NetConfig(board_size=9, num_layers=10, hidden=32)
     p, q = random_population(2, cfg, seed=2)
-    rec = play_game(p, q, GameConfig(backend="native"))
+    rec = play_game(p, q, GameConfig(board_size=9, backend="native"))
     assert len(rec.boards) == len(rec.moves) + 1
     assert rec.to_sgf().startswith("(;GM[1]")
+
+
+def test_defaults_are_19x19():
+    assert NetConfig().board_size == 19 and GameConfig().board_size == 19
+    assert GameConfig().resolved().max_moves == 3 * 19 * 19
+
+
+def test_mutation_no_crossover():
+    from goevo.player import mutate, random_genome
+    cfg = NetConfig(board_size=9, hidden=16)
+    rng = np.random.default_rng(0)
+    g = random_genome(cfg, rng)
+    c = mutate(g, cfg, 0.1, rng)
+    assert c.shape == g.shape and c.dtype == np.float32 and not np.array_equal(c, g)
+    assert np.abs(c - g).mean() < 0.1 * np.abs(g).mean()
+
+
+@pytest.mark.parametrize("selection", ["winners", "random"])
+def test_evolution_only_winners_reproduce(tmp_path, selection):
+    from goevo.evolve import EvoConfig, run_evolution
+    net = NetConfig(board_size=9, hidden=16)
+    evo = EvoConfig(generations=3, bench_every=2, bench_panel=1, checkpoint_every=2,
+                    out_dir=str(tmp_path), workers=1, selection=selection)
+    hist = run_evolution(evo, net, GameConfig(board_size=9, backend="native"), verbose=False)
+    assert len(hist) == 4
+    for prev, cur in zip(hist, hist[1:]):
+        assert len(cur["ids"]) == 10
+        for gid, par in zip(cur["ids"], cur["parents"]):
+            if gid not in prev["ids"]:          # newborn
+                assert par in prev["winners"]   # only winners have children
+            else:                               # survivor (elitism) must be a winner
+                assert gid in prev["winners"]
+        if selection == "winners":
+            for w in prev["winners"]:
+                i = prev["ids"].index(w)
+                assert prev["wins"][i] > prev["losses"][i] or prev["n_winners"] > 0
+    assert (tmp_path / "gen0000.pt").exists() and (tmp_path / "gen0003.pt").exists()
+    assert "bench_mean" in hist[2]
