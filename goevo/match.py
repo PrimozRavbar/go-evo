@@ -10,10 +10,10 @@ from .engine import BLACK, WHITE, EMPTY, make_game, GoGame
 
 @dataclass
 class GameConfig:
-    board_size: int = 9
+    board_size: int = 19
     komi: float = 7.5
     backend: str = "auto"          # auto | pettingzoo | native
-    max_moves: int | None = None   # hard cap; default 3 * N * N
+    max_moves: int | None = None   # hard cap; default 3 * N * N (1083 on 19x19, 243 on 9x9)
     min_moves_before_pass: int | None = None  # pass masked before this; default N*N//2
     forbid_own_eye_fill: bool = True  # never fill your own single-point eye
     temperature: float = 0.0       # 0 = deterministic argmax
@@ -99,6 +99,10 @@ def play_game(black, white, cfg: GameConfig = GameConfig(), rng: np.random.Gener
               on_move=None) -> GameRecord:
     """Play one game. ``on_move(game, action, record)`` is called after each move (for live viewing)."""
     cfg = cfg.resolved()
+    for p in (black, white):
+        if hasattr(p, "cfg") and p.cfg.board_size != cfg.board_size:
+            raise ValueError(f"{p.name} was built for {p.cfg.board_size}x{p.cfg.board_size}, "
+                             f"game is {cfg.board_size}x{cfg.board_size}")
     rng = rng or np.random.default_rng()
     game = make_game(cfg.board_size, cfg.komi, cfg.backend)
     rec = GameRecord(black.name, white.name, cfg.board_size, cfg.komi, game.backend_name)
