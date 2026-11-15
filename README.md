@@ -32,7 +32,10 @@ Random networks would otherwise end games instantly by passing, or ruin their ow
 
 ## Run
 
-Colab: open `notebooks/phase1_colab.ipynb` and run all cells.
+Colab: open a notebook in `notebooks/` and run all cells. The notebooks clone with `--depth 1`, so old checkpoints in the git history are not downloaded. Do the same when cloning by hand:
+```bash
+git clone --depth 1 https://github.com/PrimozRavbar/go-evo.git
+```
 
 Locally:
 ```bash
