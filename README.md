@@ -92,7 +92,7 @@ Results after 300 generations:
 * they win 45% against a random mover (2a: 34%);
 * they are still improving.
 
-### Phase 2c: faster, bigger, longer (current defaults)
+### Phase 2c: faster, bigger, longer
 * A compiled (numba) Go engine and numpy inference make games about 7× faster. Tests confirm the moves are identical to before.
 * **A player passes only when it has no other legal move.**
 * 64 genomes per generation, 2000 generations, knockout bracket, best 4 reproduce, σ = 0.03.
@@ -109,6 +109,15 @@ Results after 2000 generations (selection run vs control run):
   * generation 0 76% of the time;
   * the 2b champions 63% of the time.
 * Still improving slowly, about +0.1 vs the random mover per 1000 generations.
+
+### Phase 2d: convolutional network (current defaults)
+* **Network:** 10 3×3 conv layers, 16 channels, about 22.5k weights, independent of board size. Use `--arch mlp` for the old network.
+* **Inputs:** stones, empty points, legal moves, liberty counts (1, 2, 3+ for each side), and a plane marking the board edge.
+* **Selection:** 32 genomes, knockout; the top 4 play 2 qualifier games each against the hall of fame; the best 4 reproduce.
+* **Result after 1000 generations:**
+  * **88.5%** win rate vs the random mover (control run 62%, generation 0 38%);
+  * 81% vs the phase 2c MLP champions;
+  * 94% vs the control run.
 
 Details: [`runs/report/REPORT.md`](runs/report/REPORT.md). Notebook: `notebooks/phase2_colab.ipynb`.
 
