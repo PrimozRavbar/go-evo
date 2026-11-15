@@ -1,0 +1,11 @@
+win rate of the first set; all pairings x both colours (deterministic play)
+ c_sel vs c_ctl  0.750 ± 0.077  (n=32)
+ c_sel vs gen0   0.758 ± 0.038  (n=128)
+ c_ctl vs gen0   0.570 ± 0.044  (n=128)
+ c_sel vs ko_sel 0.625 ± 0.086  (n=32)
+
+win rate vs uniform-random mover (100 games per genome)
+ c_sel: 0.495 ± 0.025  (n=400)
+ c_ctl: 0.385 ± 0.024  (n=400)
+ko_sel: 0.440 ± 0.025  (n=400)
+  gen0: 0.281 ± 0.016  (n=800)

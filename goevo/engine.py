@@ -314,10 +314,22 @@ def pettingzoo_available() -> bool:
         return False
 
 
-def make_game(size: int = 9, komi: float = 7.5, backend: str = "auto") -> GoGame:
-    """backend: 'auto' (PettingZoo if importable, else native), 'pettingzoo', or 'native'."""
+def numba_available() -> bool:
+    try:
+        import numba  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def make_game(size: int = 19, komi: float = 7.5, backend: str = "auto") -> GoGame:
+    """backend: 'fast' (numba), 'pettingzoo', 'native' (pure python), or 'auto'
+    (fast if numba is installed, else PettingZoo, else native). All three play identically."""
     if backend == "auto":
-        backend = "pettingzoo" if pettingzoo_available() else "native"
+        backend = "fast" if numba_available() else "pettingzoo" if pettingzoo_available() else "native"
+    if backend == "fast":
+        from .fastgo import FastGo
+        return FastGo(size, komi)
     if backend == "pettingzoo":
         return PettingZooGo(size, komi)
     if backend == "native":

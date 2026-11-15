@@ -4,3 +4,4 @@ matplotlib
 ipywidgets
 pettingzoo>=1.24
 pygame  # imported by pettingzoo's classic Go env (rendering)
+numba  # fast Go engine (goevo.fastgo); optional, falls back to pettingzoo/native

@@ -127,3 +127,46 @@ Against the uniform-random mover (a stochastic opponent; 50 games per genome):
 * Keep running the 2b selection run, which is still improving. Continue from `runs/ko_sel_s0/gen0300.pt`.
 * A second seed, to confirm the result.
 * A larger population and bracket (64 genomes), or a double-elimination bracket.
+
+
+# Phase 2c: fast engine, pass only when forced, 64 genomes × 2000 generations
+
+Two runs with seed 0:
+* `c_sel_s0` uses knockout selection; the qualifier is played against the hall of fame.
+* `c_ctl_s0` picks random parents.
+
+Each run took about 1.8 h with 2 workers. Only the final 4 parents (`gen2000.pt`) are committed.
+
+![curves](curves_2c.png)
+
+The parents' win rate against the random mover (24 games each, every 10 generations) climbs steadily under selection:
+* selection run: 0.31 over the first 100 generations, 0.51 over the last 200;
+* control run: 0.28 → 0.35, which is drift only.
+
+The qualifier stays near 0.5. That is expected, because each new champion is measured against recent champions, which are similar in strength.
+
+Final evaluation (`python -m goevo.eval_phase2c`, current rules):
+
+```
+win rate of the first set; all pairings x both colours (deterministic play)
+ c_sel vs c_ctl  0.750 ± 0.077  (n=32)
+ c_sel vs gen0   0.758 ± 0.038  (n=128)
+ c_ctl vs gen0   0.570 ± 0.044  (n=128)
+ c_sel vs ko_sel 0.625 ± 0.086  (n=32)
+
+win rate vs uniform-random mover (100 games per genome)
+ c_sel: 0.495 ± 0.025  (n=400)
+ c_ctl: 0.385 ± 0.024  (n=400)
+ko_sel: 0.440 ± 0.025  (n=400)
+  gen0: 0.281 ± 0.016  (n=800)
+```
+
+## Interpretation
+* The selection signal is clear and still growing.
+  * The selection run's champions are now as good as a random mover (0.50). Generation 0 scores 0.28, and the control run gets no better than 0.39.
+  * They beat the phase 2b champions 63% of the time.
+* Progress is slow, roughly +0.1 vs the random mover per 1000 generations.
+* Ideas for faster progress:
+  * longer runs, which resume from `state.pt`;
+  * larger σ early on, or several seeds;
+  * more games per genome, to reduce noise in the knockout.

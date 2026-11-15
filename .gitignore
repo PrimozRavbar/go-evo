@@ -7,3 +7,4 @@ logs/
 
 # checkpoints: only final parents are force-added (git add -f)
 *.pt
+work/
