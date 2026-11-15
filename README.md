@@ -76,11 +76,27 @@ tests/test_goevo.py
 * They beat their own generation-0 ancestors about 80% of the time (controls: 54–61%).
 * The gain levels off after ~100 generations, and the players still lose to a random mover.
 
+### Phase 2b: stronger selection (current defaults)
+* 32 genomes per generation, in a **knockout bracket** (one game per match).
+* The top 8 also play a qualifier against the random mover and a **hall of fame** of past champions.
+* **Only the best 4 reproduce.** σ = 0.03.
+* Only the final 4 parents are checkpointed (about 6 MB per run).
+
+Results after 300 generations:
+* the 2b players beat their generation 0 90% of the time;
+* they beat the control 91% of the time;
+* they beat the phase 2a champions 57% of the time;
+* they win 45% against a random mover (2a: 34%);
+* they are still improving.
+
 Details: [`runs/report/REPORT.md`](runs/report/REPORT.md). Notebook: `notebooks/phase2_colab.ipynb`.
 
+**Checkpoints and repo size:** `*.pt` files are git-ignored. Only each run's final parents checkpoint is committed (force-added).
+Generation 0 is never stored: `goevo.evolve.initial_population` regenerates it from the seed.
+
 ```bash
-python -m goevo.phase2 --generations 300 --selection winners --seed 0 --out runs/sel_s0
+python -m goevo.phase2 --generations 300 --seed 0 --out runs/ko_sel_s0
 ```
 ```bash
-python -m goevo.phase2 --generations 300 --selection random --seed 0 --out runs/ctl_s0
+python -m goevo.phase2 --generations 300 --seed 0 --selection random --out runs/ko_ctl_s0
 ```
