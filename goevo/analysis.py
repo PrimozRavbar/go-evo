@@ -106,3 +106,40 @@ def plot_runs(run_dirs: dict[str, str], path: str):
     plt.tight_layout()
     fig.savefig(path, dpi=110)
     plt.close(fig)
+
+
+def plot_progress(run_dirs: dict[str, str], path: str, smooth: int = 5):
+    """Phase 2c plot: parents' win rate vs the random mover, qualifier vs hall of fame, game length."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    def sm(x, y, k):
+        x, y = np.asarray(x), np.asarray(y, float)
+        k = max(1, min(k, len(y)))
+        return x[k - 1:], np.convolve(y, np.ones(k) / k, mode="valid")
+
+    fig, axs = plt.subplots(1, 3, figsize=(16, 4.5))
+    for label, d in run_dirs.items():
+        hist = load_history(d)
+        c = "#d1561f" if "sel" in label else "#9a9a9a"
+        g = np.array([h["gen"] for h in hist if "bench_by_opp" in h])
+        rm = [h["bench_by_opp"].get("random_mover", np.nan) for h in hist if "bench_by_opp" in h]
+        axs[0].plot(*sm(g, rm, smooth), color=c, label=label)
+        q = [(h["gen"], h["qualifier_mean"]) for h in hist if "qualifier_mean" in h]
+        if q:
+            qg, qv = zip(*q)
+            axs[1].plot(*sm(qg, qv, 25), color=c, label=label)
+        mv = [h["mean_moves"] for h in hist]
+        axs[2].plot(*sm([h["gen"] for h in hist], mv, 25), color=c, label=label)
+    axs[0].axhline(0.5, color="k", lw=.6)
+    axs[0].set_title(f"parents' win rate vs random mover ({smooth}-point avg)")
+    axs[1].axhline(0.5, color="k", lw=.6)
+    axs[1].set_title("qualifier win rate vs past champions (25-gen avg)")
+    axs[2].set_title("mean game length (25-gen avg)")
+    for a in axs:
+        a.set_xlabel("generation")
+        a.legend(fontsize=8)
+    plt.tight_layout()
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
