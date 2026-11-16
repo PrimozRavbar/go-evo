@@ -119,6 +119,15 @@ Results after 2000 generations (selection run vs control run):
   * 81% vs the phase 2c MLP champions;
   * 94% vs the control run.
 
+### Phase 3: parameter-efficient evolution (branch `claude/phase3-lowrank`)
+* **Network:** a 20-layer MLP where every weight matrix is a pure low-rank product W = A·B (rank 32), 216k weights. Use `--arch lowrank --rank r`.
+* **Selection:** as in phase 2d. 10,000 generations: `python -m goevo.phase3`.
+* **Result:**
+  * reaches phase 2c strength (50% vs the random mover) in about 1000 generations;
+  * beats the 2c MLP champions 69% of the time;
+  * levels off after that, and loses 78% of its games against the 2d conv champions.
+* Report: [`runs/report/PHASE3.md`](runs/report/PHASE3.md).
+
 Details: [`runs/report/REPORT.md`](runs/report/REPORT.md). Notebook: `notebooks/phase2_colab.ipynb`.
 
 **Checkpoints and repo size:** `*.pt` files are git-ignored. Only each run's final parents checkpoint is committed (force-added).
