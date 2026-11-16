@@ -128,6 +128,14 @@ Results after 2000 generations (selection run vs control run):
   * levels off after that, and loses 78% of its games against the 2d conv champions.
 * Report: [`runs/report/PHASE3.md`](runs/report/PHASE3.md).
 
+### Phase 4: residual CNN with normalization (branch `claude/phase4-cnn`)
+* **Network:** a conv stem, then 4 pre-activation residual blocks with GroupNorm(1) (LayerNorm over C, H, W), 16 channels, 20.5k weights. Use `--arch resnet`.
+* **Selection:** as in phase 2d. 4000 generations (about 8.3 h on 4 cores): `python -m goevo.phase4`.
+* **Result:**
+  * beats the random mover in 400 of 400 games;
+  * beats the 2d conv champions 81% of the time and the phase 3 champions 100%.
+* Report: [`runs/report/PHASE4.md`](runs/report/PHASE4.md).
+
 Details: [`runs/report/REPORT.md`](runs/report/REPORT.md). Notebook: `notebooks/phase2_colab.ipynb`.
 
 **Checkpoints and repo size:** `*.pt` files are git-ignored. Only each run's final parents checkpoint is committed (force-added).

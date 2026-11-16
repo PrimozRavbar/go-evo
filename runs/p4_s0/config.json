@@ -1,0 +1,48 @@
+{
+ "evo": {
+  "pop_size": 32,
+  "tournament": "knockout",
+  "games_per_player": 5,
+  "n_parents": 4,
+  "generations": 4000,
+  "sigma": 0.03,
+  "elitism": true,
+  "selection": "fitness",
+  "external_top": 4,
+  "external_weight": 1.5,
+  "hof_size": 50,
+  "hof_games": 2,
+  "qualifier_vs_random_mover": false,
+  "seed": 0,
+  "bench_every": 500,
+  "bench_panel": 0,
+  "bench_vs_random_mover": true,
+  "bench_rm_games": 24,
+  "checkpoint_every": 1000,
+  "checkpoint_parents_only": true,
+  "state_every": 25,
+  "resume": true,
+  "out_dir": "work/p4_s0",
+  "workers": 4
+ },
+ "net": {
+  "board_size": 19,
+  "num_layers": 10,
+  "hidden": 128,
+  "activation": "tanh",
+  "arch": "resnet",
+  "channels": 16,
+  "rank": 32,
+  "blocks": 4
+ },
+ "game": {
+  "board_size": 19,
+  "komi": 7.5,
+  "backend": "fast",
+  "max_moves": 1083,
+  "pass_rule": "forced",
+  "min_moves_before_pass": 180,
+  "forbid_own_eye_fill": true,
+  "temperature": 0.0
+ }
+}
