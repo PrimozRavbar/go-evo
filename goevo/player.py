@@ -7,6 +7,11 @@ architecture (``NetConfig.arch``):
 * ``"lowrank"`` - MLP (``num_layers`` Linear layers, width ``hidden``) where every weight
   matrix is a pure low-rank product W = A @ B, A (out x rank), B (rank x in). The genome
   holds only A, B and the biases (phase 3, parameter-efficient evolution).
+* ``"resnet"`` - conv stem, ``blocks`` pre-activation residual blocks
+  (norm -> act -> conv -> norm -> act -> conv, added to the input), a final norm, and the
+  same point / pass heads as ``"conv"``. Norm = LayerNorm over (C, H, W) per position with
+  per-channel gain and bias (GroupNorm with 1 group), since we evaluate one position at a
+  time. The second conv of each block starts at 0.1x scale (near-identity start). Phase 4.
 * ``"conv"`` - ``num_layers`` 3x3 convolutions with ``channels`` channels (zero padding),
   then a 1x1 convolution giving one logit per point and a linear pass logit computed
   from the globally averaged features. Inputs are ``CONV_PLANES`` feature planes,
@@ -41,10 +46,23 @@ class NetConfig:
     arch: str = "mlp"          # mlp | lowrank | conv
     channels: int = 16         # conv: channels of every conv layer
     rank: int = 32             # lowrank: rank r of every W = A @ B
+    blocks: int = 4            # resnet: residual blocks (2 convs each)
 
-    def param_blocks(self) -> list[tuple[tuple[int, ...], float]]:
-        """[(shape, init std)] of every parameter tensor, in genome order."""
+    def param_blocks(self) -> list[tuple]:
+        """[(shape, init std[, init mean, mutation scale])] of every parameter tensor, in
+        genome order. Mutation scale defaults to the init std."""
         gain = _GAIN[self.activation]
+        if self.arch == "resnet":
+            C, P = self.channels, CONV_PLANES
+            conv = lambda cin, k=1.0: [((C, cin, 3, 3), k * gain / np.sqrt(cin * 9), 0.0,
+                                        gain / np.sqrt(cin * 9)),
+                                       ((C,), 0.1 * k, 0.0, 0.1)]
+            norm = [((C,), 0.0, 1.0, 0.1), ((C,), 0.0, 0.0, 0.1)]  # gain = 1, bias = 0
+            out = conv(P)
+            for _ in range(self.blocks):
+                out += norm + conv(C) + norm + conv(C, 0.1)
+            return out + norm + [((1, C, 1, 1), gain / np.sqrt(C)), ((1,), 0.1),
+                                 ((1, C), gain / np.sqrt(C)), ((1,), 0.1)]
         if self.arch == "lowrank":
             out = []
             for i, o in self.layer_dims():
@@ -80,7 +98,7 @@ class NetConfig:
 
     @property
     def genome_size(self) -> int:
-        return sum(int(np.prod(shape)) for shape, _ in self.param_blocks())
+        return sum(int(np.prod(b[0])) for b in self.param_blocks())
 
 
 _ACT = {"tanh": nn.Tanh, "relu": nn.ReLU, "gelu": nn.GELU}
@@ -119,9 +137,43 @@ class LowRankLinear(nn.Module):
         return (x @ self.B.T) @ self.A.T + self.bias
 
 
+class ResBlock(nn.Module):
+    def __init__(self, C, act):
+        super().__init__()
+        self.n1, self.c1 = nn.GroupNorm(1, C), nn.Conv2d(C, C, 3, padding=1)
+        self.n2, self.c2 = nn.GroupNorm(1, C), nn.Conv2d(C, C, 3, padding=1)
+        self.act = act
+
+    def forward(self, x):
+        return x + self.c2(self.act(self.n2(self.c1(self.act(self.n1(x))))))
+
+
+class ResNet(nn.Module):
+    """Torch reference of the resnet architecture; parameters in genome order."""
+
+    def __init__(self, cfg: NetConfig):
+        super().__init__()
+        C, act = cfg.channels, _ACT[cfg.activation]()
+        self.stem = nn.Conv2d(CONV_PLANES, C, 3, padding=1)
+        self.blocks = nn.ModuleList([ResBlock(C, act) for _ in range(cfg.blocks)])
+        self.norm = nn.GroupNorm(1, C)
+        self.point = nn.Conv2d(C, 1, 1)
+        self.pass_ = nn.Linear(C, 1)
+        self.act = act
+
+    def forward(self, x):
+        x = self.stem(x)
+        for b in self.blocks:
+            x = b(x)
+        x = self.act(self.norm(x))
+        return torch.cat([self.point(x).flatten(1), self.pass_(x.mean((2, 3)))], 1)
+
+
 def build_net(cfg: NetConfig) -> nn.Module:
     if cfg.arch == "conv":
         return ConvNet(cfg)
+    if cfg.arch == "resnet":
+        return ResNet(cfg)
     if cfg.arch == "lowrank":
         dims = cfg.layer_dims()
         layers = []
@@ -141,7 +193,8 @@ def build_net(cfg: NetConfig) -> nn.Module:
 
 def random_genome(cfg: NetConfig, rng: np.random.Generator) -> np.ndarray:
     """Variance-preserving random init (so signals survive many layers)."""
-    parts = [rng.normal(0.0, std, size=shape).ravel() for shape, std in cfg.param_blocks()]
+    parts = [rng.normal(b[2] if len(b) > 2 else 0.0, b[1], size=b[0]).ravel()
+             for b in cfg.param_blocks()]
     return np.concatenate(parts).astype(np.float32)
 
 
@@ -199,6 +252,12 @@ class Player:
         # numpy copies of the weights: for batch-1 inference numpy is much faster than torch
         self._layers = []
         off = 0
+        if cfg.arch == "resnet":
+            for b in cfg.param_blocks():
+                nw = int(np.prod(b[0]))
+                a = genome[off:off + nw].reshape(b[0])
+                off += nw
+                self._layers.append(a.reshape(a.shape[0], -1).copy() if a.ndim == 4 else a)
         if cfg.arch == "lowrank":
             blocks = []
             for shape, _ in cfg.param_blocks():
@@ -207,7 +266,7 @@ class Player:
                 off += nw
             for A, B, b in zip(blocks[0::3], blocks[1::3], blocks[2::3]):
                 self._layers.append((B.T.copy(), A.T.copy(), b))  # x @ B.T @ A.T + b
-        for wshape, nb, _ in (cfg.param_shapes() if cfg.arch != "lowrank" else []):
+        for wshape, nb, _ in (cfg.param_shapes() if cfg.arch in ("mlp", "conv") else []):
             nw = int(np.prod(wshape))
             W = genome[off:off + nw].reshape(wshape)
             off += nw
@@ -223,6 +282,22 @@ class Player:
 
     def logits(self, features: np.ndarray) -> np.ndarray:
         x = features.astype(np.float32, copy=False)
+        if self.cfg.arch == "resnet":
+            n, L, act = self.cfg.board_size, self._layers, self._act
+            def norm(z, g, b):
+                z = (z - z.mean()) / np.sqrt(z.var() + 1e-5)
+                return z * g[:, None, None] + b[:, None, None]
+            x = _conv3x3(x, L[0], L[1], n)
+            k = 2
+            for _ in range(self.cfg.blocks):
+                g1, b1, W1, c1, g2, b2, W2, c2 = L[k:k + 8]
+                k += 8
+                h = _conv3x3(act(norm(x, g1, b1)), W1, c1, n)
+                x = x + _conv3x3(act(norm(h, g2, b2)), W2, c2, n)
+            x = act(norm(x, L[k], L[k + 1]))
+            Wp, bp, Wq, bq = L[k + 2:k + 6]
+            flat = x.reshape(x.shape[0], -1)
+            return np.concatenate([(Wp @ flat)[0] + bp, Wq @ flat.mean(1) + bq])
         if self.cfg.arch == "conv":
             n = self.cfg.board_size
             for W, b in self._layers[:-2]:
@@ -261,7 +336,7 @@ class Player:
                     max_moves: int, temperature: float = 0.0,
                     rng: np.random.Generator | None = None) -> int:
         """Masked argmax (temperature 0) or softmax sampling over ``allowed``."""
-        feats = encode_planes(game, legal) if self.cfg.arch == "conv" else encode_state(game, legal, max_moves)
+        feats = encode_planes(game, legal) if self.cfg.arch in ("conv", "resnet") else encode_state(game, legal, max_moves)
         z = self.logits(feats).astype(np.float64)
         z[~allowed] = -np.inf
         if temperature <= 0:
@@ -277,8 +352,8 @@ class Player:
 
 def layer_scales(cfg: NetConfig) -> np.ndarray:
     """Per-parameter init std (same layout as the genome) - used to scale mutations."""
-    return np.concatenate([np.full(int(np.prod(shape)), std, np.float32)
-                           for shape, std in cfg.param_blocks()])
+    return np.concatenate([np.full(int(np.prod(b[0])), b[3] if len(b) > 3 else b[1], np.float32)
+                           for b in cfg.param_blocks()])
 
 
 def mutate(genome: np.ndarray, cfg: NetConfig, sigma: float, rng: np.random.Generator,
