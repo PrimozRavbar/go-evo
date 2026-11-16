@@ -33,7 +33,8 @@ def main(argv=None):
     ap.add_argument("--komi", type=float, default=7.5)
     ap.add_argument("--layers", type=int, default=10)
     ap.add_argument("--hidden", type=int, default=128, help="MLP width")
-    ap.add_argument("--arch", default="conv", choices=["conv", "mlp"])
+    ap.add_argument("--arch", default="conv", choices=["conv", "mlp", "lowrank"])
+    ap.add_argument("--rank", type=int, default=32, help="lowrank: rank of every W = A @ B")
     ap.add_argument("--channels", type=int, default=16, help="conv channels")
     ap.add_argument("--backend", default="auto", choices=["auto", "fast", "pettingzoo", "native"],
                     help="auto = fast (numba) if available; all backends play identically")
@@ -67,7 +68,7 @@ def main(argv=None):
         from .engine import numba_available
         backend = "fast" if numba_available() else "pettingzoo" if pettingzoo_available() else "native"
     net = NetConfig(board_size=a.size, num_layers=a.layers, hidden=a.hidden, arch=a.arch,
-                    channels=a.channels)
+                    channels=a.channels, rank=a.rank)
     game = GameConfig(board_size=a.size, komi=a.komi, backend=backend, max_moves=a.max_moves,
                       pass_rule=a.pass_rule)
     evo = EvoConfig(pop_size=a.pop, tournament=a.tournament, games_per_player=a.games,

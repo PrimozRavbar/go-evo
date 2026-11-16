@@ -4,6 +4,9 @@ A *genome* is a flat float32 vector holding every weight and bias of a fixed
 architecture (``NetConfig.arch``):
 
 * ``"mlp"``  - ``num_layers`` Linear layers (default 10, hidden 128), phases 1-2c.
+* ``"lowrank"`` - MLP (``num_layers`` Linear layers, width ``hidden``) where every weight
+  matrix is a pure low-rank product W = A @ B, A (out x rank), B (rank x in). The genome
+  holds only A, B and the biases (phase 3, parameter-efficient evolution).
 * ``"conv"`` - ``num_layers`` 3x3 convolutions with ``channels`` channels (zero padding),
   then a 1x1 convolution giving one logit per point and a linear pass logit computed
   from the globally averaged features. Inputs are ``CONV_PLANES`` feature planes,
@@ -35,8 +38,23 @@ class NetConfig:
     num_layers: int = 10       # MLP: Linear layers; conv: 3x3 conv layers
     hidden: int = 128          # MLP: width of every hidden layer
     activation: str = "tanh"   # tanh | relu | gelu
-    arch: str = "mlp"          # mlp | conv
+    arch: str = "mlp"          # mlp | lowrank | conv
     channels: int = 16         # conv: channels of every conv layer
+    rank: int = 32             # lowrank: rank r of every W = A @ B
+
+    def param_blocks(self) -> list[tuple[tuple[int, ...], float]]:
+        """[(shape, init std)] of every parameter tensor, in genome order."""
+        gain = _GAIN[self.activation]
+        if self.arch == "lowrank":
+            out = []
+            for i, o in self.layer_dims():
+                s = (gain ** 2 / (i * self.rank)) ** 0.25  # var(AB entries) = gain^2 / fan_in
+                out += [((o, self.rank), s), ((self.rank, i), s), ((o,), 0.1)]
+            return out
+        out = []
+        for wshape, nb, fan_in in self.param_shapes():
+            out += [(wshape, gain / np.sqrt(fan_in)), ((nb,), 0.1)]
+        return out
 
     def param_shapes(self) -> list[tuple[tuple[int, ...], int, int]]:
         """[(weight shape, bias size, fan_in)] in genome order."""
@@ -62,7 +80,7 @@ class NetConfig:
 
     @property
     def genome_size(self) -> int:
-        return sum(int(np.prod(w)) + b for w, b, _ in self.param_shapes())
+        return sum(int(np.prod(shape)) for shape, _ in self.param_blocks())
 
 
 _ACT = {"tanh": nn.Tanh, "relu": nn.ReLU, "gelu": nn.GELU}
@@ -88,9 +106,30 @@ class ConvNet(nn.Module):
         return torch.cat([pts, self.pass_(x.mean((2, 3)))], 1)
 
 
+class LowRankLinear(nn.Module):
+    """y = x @ (A @ B).T + bias; parameters registered in genome order A, B, bias."""
+
+    def __init__(self, i, o, r):
+        super().__init__()
+        self.A = nn.Parameter(torch.zeros(o, r))
+        self.B = nn.Parameter(torch.zeros(r, i))
+        self.bias = nn.Parameter(torch.zeros(o))
+
+    def forward(self, x):
+        return (x @ self.B.T) @ self.A.T + self.bias
+
+
 def build_net(cfg: NetConfig) -> nn.Module:
     if cfg.arch == "conv":
         return ConvNet(cfg)
+    if cfg.arch == "lowrank":
+        dims = cfg.layer_dims()
+        layers = []
+        for k, (i, o) in enumerate(dims):
+            layers.append(LowRankLinear(i, o, cfg.rank))
+            if k < len(dims) - 1:
+                layers.append(_ACT[cfg.activation]())
+        return nn.Sequential(*layers)
     layers: list[nn.Module] = []
     dims = cfg.layer_dims()
     for k, (i, o) in enumerate(dims):
@@ -101,13 +140,8 @@ def build_net(cfg: NetConfig) -> nn.Module:
 
 
 def random_genome(cfg: NetConfig, rng: np.random.Generator) -> np.ndarray:
-    """Variance-preserving random init (so signals survive 10 layers)."""
-    parts = []
-    gain = _GAIN[cfg.activation]
-    for wshape, nb, fan_in in cfg.param_shapes():
-        w = rng.normal(0.0, gain / np.sqrt(fan_in), size=wshape)
-        b = rng.normal(0.0, 0.1, size=nb)
-        parts += [w.ravel(), b]
+    """Variance-preserving random init (so signals survive many layers)."""
+    parts = [rng.normal(0.0, std, size=shape).ravel() for shape, std in cfg.param_blocks()]
     return np.concatenate(parts).astype(np.float32)
 
 
@@ -165,7 +199,15 @@ class Player:
         # numpy copies of the weights: for batch-1 inference numpy is much faster than torch
         self._layers = []
         off = 0
-        for wshape, nb, _ in cfg.param_shapes():
+        if cfg.arch == "lowrank":
+            blocks = []
+            for shape, _ in cfg.param_blocks():
+                nw = int(np.prod(shape))
+                blocks.append(genome[off:off + nw].reshape(shape))
+                off += nw
+            for A, B, b in zip(blocks[0::3], blocks[1::3], blocks[2::3]):
+                self._layers.append((B.T.copy(), A.T.copy(), b))  # x @ B.T @ A.T + b
+        for wshape, nb, _ in (cfg.param_shapes() if cfg.arch != "lowrank" else []):
             nw = int(np.prod(wshape))
             W = genome[off:off + nw].reshape(wshape)
             off += nw
@@ -189,6 +231,12 @@ class Player:
             flat = x.reshape(x.shape[0], -1)
             return np.concatenate([(Wp @ flat)[0] + bp, Wq @ flat.mean(1) + bq])
         last = len(self._layers) - 1
+        if self.cfg.arch == "lowrank":
+            for k, (Bt, At, b) in enumerate(self._layers):
+                x = (x @ Bt) @ At + b
+                if k < last:
+                    x = self._act(x)
+            return x
         for k, (W, b) in enumerate(self._layers):
             x = x @ W + b
             if k < last:
@@ -229,12 +277,8 @@ class Player:
 
 def layer_scales(cfg: NetConfig) -> np.ndarray:
     """Per-parameter init std (same layout as the genome) - used to scale mutations."""
-    gain = _GAIN[cfg.activation]
-    parts = []
-    for wshape, nb, fan_in in cfg.param_shapes():
-        parts += [np.full(int(np.prod(wshape)), gain / np.sqrt(fan_in), np.float32),
-                  np.full(nb, 0.1, np.float32)]
-    return np.concatenate(parts)
+    return np.concatenate([np.full(int(np.prod(shape)), std, np.float32)
+                           for shape, std in cfg.param_blocks()])
 
 
 def mutate(genome: np.ndarray, cfg: NetConfig, sigma: float, rng: np.random.Generator,
