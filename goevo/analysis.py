@@ -42,10 +42,13 @@ def survivor_advantage(hist):
     return np.array(out)
 
 
-def head_to_head(pop_a, pop_b, net_cfg, game_cfg: GameConfig, workers=None, seed=0):
-    """Win rate of population A vs population B (all pairs, both colours)."""
+def head_to_head(pop_a, pop_b, net_cfg, game_cfg: GameConfig, workers=None, seed=0, cfg_b=None):
+    """Win rate of population A vs population B (all pairs, both colours).
+
+    ``cfg_b``: network config of B when it differs from A's (e.g. conv vs MLP).
+    """
     a = [("genome", f"A{n}", g) for n, g in zip(range(len(pop_a)), pop_a)]
-    b = [("genome", f"B{n}", g) for n, g in zip(range(len(pop_b)), pop_b)]
+    b = [("genome", f"B{n}", g) + ((cfg_b,) if cfg_b else ()) for n, g in zip(range(len(pop_b)), pop_b)]
     pairs, signs = [], []
     for x in a:
         for y in b:

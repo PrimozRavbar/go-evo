@@ -56,6 +56,9 @@ class GoGame:
         raise NotImplementedError
 
     # --- shared helpers ---------------------------------------------------
+    def liberty_map(self) -> np.ndarray:  # (N, N) liberties of each stone's group
+        return liberty_map(self.board)
+
     @property
     def pass_action(self) -> int:
         return self.size * self.size
@@ -120,6 +123,34 @@ def area_score(board: np.ndarray, komi: float) -> float:
             elif borders == {WHITE}:
                 white += region
     return black - white - komi
+
+
+def liberty_map(board: np.ndarray) -> np.ndarray:
+    """(N, N) int: liberties of the group each stone belongs to (0 on empty points)."""
+    n = board.shape[0]
+    out = np.zeros((n, n), dtype=np.int64)
+    done = np.zeros((n, n), dtype=bool)
+    for r0 in range(n):
+        for c0 in range(n):
+            if board[r0, c0] == EMPTY or done[r0, c0]:
+                continue
+            color = board[r0, c0]
+            stack, group, libs = [(r0, c0)], [], set()
+            done[r0, c0] = True
+            while stack:
+                r, c = stack.pop()
+                group.append((r, c))
+                for rr, cc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
+                    if 0 <= rr < n and 0 <= cc < n:
+                        v = board[rr, cc]
+                        if v == EMPTY:
+                            libs.add((rr, cc))
+                        elif v == color and not done[rr, cc]:
+                            done[rr, cc] = True
+                            stack.append((rr, cc))
+            for r, c in group:
+                out[r, c] = len(libs)
+    return out
 
 
 # ---------------------------------------------------------------------------

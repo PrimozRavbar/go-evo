@@ -23,7 +23,7 @@ def spec_of(p) -> tuple:
 def _build(spec, net_cfg):
     if spec[0] == "random":
         return RandomPlayer(spec[1])
-    return Player(spec[2], net_cfg, name=spec[1])
+    return Player(spec[2], spec[3] if len(spec) > 3 else net_cfg, name=spec[1])  # optional own cfg
 
 
 def _worker_init():

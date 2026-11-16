@@ -170,3 +170,45 @@ ko_sel: 0.440 ± 0.025  (n=400)
   * longer runs, which resume from `state.pt`;
   * larger σ early on, or several seeds;
   * more games per genome, to reduce noise in the knockout.
+
+
+# Phase 2d: convolutional network, 32 genomes × 1000 generations
+
+Changes from phase 2c:
+* **Network:** 10 3×3 conv layers, 16 channels, tanh; one output per board point plus a pass output from the averaged features.
+  * About 22.5k weights, which is 16× fewer than the MLP and independent of board size.
+* **Inputs:** 11 planes:
+  * own, opponent and empty points, and legal moves;
+  * liberty counts of 1, 2 and 3+ for each side;
+  * a plane of ones that shows the board edge.
+* **Selection:** 32 genomes, knockout bracket. The top 4 play 2 qualifier games each against the hall of fame, and the best 4 reproduce. σ = 0.03.
+* **Speed:** about 7 s per generation with 2 workers; each run took about 2 h.
+
+![curves](curves_2d.png)
+
+Final evaluation (`python -m goevo.eval_phase2d 1000`):
+
+```
+phase 2d, generation 1000. Win rate of the first set; all pairings x both colours
+d_sel vs d_ctl        0.938 ± 0.043  (n=32)
+d_sel vs gen0         0.867 ± 0.030  (n=128)
+d_sel vs c_sel (MLP)  0.812 ± 0.069  (n=32)
+d_ctl vs gen0         0.562 ± 0.044  (n=128)
+
+win rate vs uniform-random mover (100 games per genome)
+ d_sel: 0.885 ± 0.016  (n=400)
+ d_ctl: 0.623 ± 0.024  (n=400)
+  gen0: 0.383 ± 0.017  (n=800)
+```
+
+## Interpretation
+* **The target is reached:**
+  * The selection run's champions beat the random mover **88.5 ± 1.6%** of the time. The MLP reached 50% after 2000 generations.
+  * They beat the phase 2c MLP champions 81% of the time.
+  * They beat the control run 94% of the time.
+* **Most of the gain comes early:** the champions reach about 0.8 vs the random mover within 100 generations. After about 500 generations they level off around 0.85–0.9.
+* **Selection matters, not just the architecture:** the control run, with the same architecture, drifts to 0.62 vs the random mover, and generation 0 scores 0.38.
+* **Next options:**
+  * a stronger yardstick than the random mover, for example the MLP champions, or a one-ply greedy player that captures whenever it can;
+  * more channels;
+  * longer runs, which resume from `work/`.

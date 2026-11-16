@@ -1,0 +1,10 @@
+phase 2d, generation 1000. Win rate of the first set; all pairings x both colours
+d_sel vs d_ctl        0.938 ± 0.043  (n=32)
+d_sel vs gen0         0.867 ± 0.030  (n=128)
+d_sel vs c_sel (MLP)  0.812 ± 0.069  (n=32)
+d_ctl vs gen0         0.562 ± 0.044  (n=128)
+
+win rate vs uniform-random mover (100 games per genome)
+ d_sel: 0.885 ± 0.016  (n=400)
+ d_ctl: 0.623 ± 0.024  (n=400)
+  gen0: 0.383 ± 0.017  (n=800)
