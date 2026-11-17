@@ -143,6 +143,7 @@ Results after 2000 generations (selection run vs control run):
   * after 1 h it already beats the final phase 4 evolved parents;
   * the final policies win 100% against the phase 4, 2d and 3 champions and the random mover.
 * Report: [`runs/report/PHASE5.md`](runs/report/PHASE5.md).
+* Watch and play games (PPO, evolved players, random, you): `notebooks/games_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_colab.ipynb)
 
 Details: [`runs/report/REPORT.md`](runs/report/REPORT.md). Notebook: `notebooks/phase2_colab.ipynb`.
 
