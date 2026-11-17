@@ -3,8 +3,10 @@
     from goevo.clickboard import ClickGame
     ClickGame(opponent_player, human_color=1).show()     # 1 = you play black, -1 = white
 
-Same rules as training and evaluation (``GameConfig``): pass only when no stone move is
-possible (it then happens automatically), no filling your own single-point eye, move cap.
+The network plays by the training rules (``GameConfig``): it passes only when no stone move is
+possible, never fills its own single-point eye, move cap. You have the same eye rule, are passed
+for automatically when you have no stone move, and can also pass voluntarily ("Pass"; two passes
+in a row end the game) or stop and area-score the current position ("End and score").
 """
 from __future__ import annotations
 
@@ -82,13 +84,17 @@ class ClickGame:
         self.status = w.HTML()
         self.new_btn = w.Button(description="New game", button_style="info")
         self.new_btn.on_click(lambda _: self.reset())
+        self.pass_btn = w.Button(description="Pass")
+        self.pass_btn.on_click(lambda _: self.human_pass())
+        self.end_btn = w.Button(description="End and score", button_style="warning")
+        self.end_btn.on_click(lambda _: self.end_and_score())
         self.reset()
 
     # ------------------------------------------------------------------ game flow
     def reset(self):
         self.game = make_game(self.n, self.gc.komi, self.gc.backend)
         self.moves, self.last = [], None
-        self.msg = ""
+        self.msg, self.ended = "", False
         self._advance()
 
     def _allowed(self):
@@ -96,7 +102,7 @@ class ClickGame:
         return legal, allowed_moves(self.game, legal, self.gc)
 
     def _over(self):
-        return self.game.is_over() or self.game.move_number >= self.gc.max_moves
+        return self.ended or self.game.is_over() or self.game.move_number >= self.gc.max_moves
 
     def _play(self, a):
         self.game.play(a)
@@ -130,6 +136,24 @@ class ClickGame:
         self.status.value = "<b>thinking…</b>"
         self._advance()
 
+    def human_pass(self):
+        """Voluntary pass (only you can do this; the network passes only when it must).
+        The game ends after two passes in a row."""
+        if self._over() or self.game.to_play != self.me:
+            return
+        self.msg = "You passed."
+        self._play(self.n * self.n)
+        self._advance()
+
+    def end_and_score(self):
+        """Stop now and area-score the position as it stands."""
+        if self._over():
+            return
+        self.ended = True
+        self.msg = ("Scored as the board stands: dead stones still on the board count as alive, "
+                    "and empty regions touching both colours count for nobody.")
+        self._render()
+
     # ------------------------------------------------------------------ drawing
     def _name(self, a):
         return "pass" if a == self.n * self.n else f"{COLS[a % self.n]}{self.n - a // self.n}"
@@ -147,7 +171,8 @@ class ClickGame:
             s = self.game.score()
             res = f"B+{s:.1f}" if s > 0 else f"W+{-s:.1f}" if s < 0 else "draw"
             won = (s > 0) == (self.me == BLACK) and s != 0
-            head = f"<b>Game over: {res}. {'You win!' if won else 'You lose.'}</b>"
+            how = "Ended early" if self.ended else "Game over"
+            head = f"<b>{how}: {res}. {'You win!' if won else 'You lose.' if s != 0 else 'Draw.'}</b>"
         else:
             head = f"You play <b>{you}</b> vs <b>{self.ai.name}</b>. Your move."
         self.status.value = (f"{head}<br>move {self.game.move_number} &nbsp; {last}"
@@ -155,5 +180,6 @@ class ClickGame:
 
     def show(self):
         from IPython.display import display
-        display(self.w.VBox([self.w.HTML(CSS), self.status, self.grid, self.new_btn]))
+        display(self.w.VBox([self.w.HTML(CSS), self.status, self.grid,
+                             self.w.HBox([self.pass_btn, self.end_btn, self.new_btn])]))
         return self
