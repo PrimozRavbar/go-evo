@@ -143,6 +143,14 @@ Results after 2000 generations (selection run vs control run):
   * after 1 h it already beats the final phase 4 evolved parents;
   * the final policies win 100% against the phase 4, 2d and 3 champions and the random mover.
 * Report: [`runs/report/PHASE5.md`](runs/report/PHASE5.md).
+
+### Phase 5b: bigger PPO network (branch `claude/phase5b-ppo-big`)
+* **Network:** 32 channels, 6 blocks (115k weights), with random board rotations and mirrors. 8 h, 16.4k games. Command: `python -m goevo.ppo --channels 32 --blocks 6 --sym`.
+* **Result:**
+  * beats every evolved player;
+  * loses all games to the small PPO, and also learns less per game;
+  * needs roughly 20–30 h to catch up.
+* Report: [`runs/report/PHASE5B.md`](runs/report/PHASE5B.md).
 * Watch and play games (PPO, evolved players, random, you): `notebooks/games_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_colab.ipynb)
 * Play against them by clicking on the board: `notebooks/games_click_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_click_colab.ipynb)
 * Train PPO yourself, every step written out in the notebook: `notebooks/ppo_training_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/ppo_training_colab.ipynb)
