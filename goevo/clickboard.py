@@ -15,7 +15,30 @@ from .match import GameConfig
 from .ppo import allowed_moves
 
 COLS = "ABCDEFGHJKLMNOPQRST"
-WOOD, CELL = "#dcb35c", "28px"
+CELL = "28px"
+
+# Each button is one intersection: CSS draws the two grid lines through its centre (half lines
+# on the edges), the star points, the stone (80% of the line spacing) and a red dot on the last move.
+CSS = """<style>
+.gocell { --mark: none; --stone: none;
+  --vs: 1px 100%; --vp: center center; --hs: 100% 1px; --hp: center center;
+  background-color: #dcb35c !important;
+  background-image: var(--mark), var(--stone), linear-gradient(#333, #333), linear-gradient(#333, #333) !important;
+  background-size: 100% 100%, 100% 100%, var(--vs), var(--hs) !important;
+  background-position: center, center, var(--vp), var(--hp) !important;
+  background-repeat: no-repeat !important;
+  border: none !important; box-shadow: none !important; outline: none !important;
+  padding: 0 !important; margin: 0 !important; min-width: 0 !important; border-radius: 0 !important; }
+.gocell.top    { --vs: 1px 50%; --vp: center bottom; }
+.gocell.bottom { --vs: 1px 50%; --vp: center top; }
+.gocell.left   { --hs: 50% 1px; --hp: right center; }
+.gocell.right  { --hs: 50% 1px; --hp: left center; }
+.gocell.star   { --stone: radial-gradient(circle, #333 0 2.5px, transparent 3.5px); }
+.gocell.b { --stone: radial-gradient(circle at 42% 40%, #555 0, #111 7px, #000 10.5px, transparent 11.5px); }
+.gocell.w { --stone: radial-gradient(circle at 42% 40%, #fff 0, #eee 7px, #bbb 10px, #666 10.5px, transparent 11.5px); }
+.gocell.last { --mark: radial-gradient(circle, #e01010 0 3.5px, transparent 4.5px); }
+.gocell.e:hover { --mark: radial-gradient(circle, rgba(0,0,0,0.28) 0 10px, transparent 11px); }
+</style>"""
 
 
 class ClickGame:
@@ -28,13 +51,18 @@ class ClickGame:
         self.temperature, self.rng = temperature, np.random.default_rng(seed)
         n = self.n = self.gc.board_size
         self.buttons = []
+        stars = {3, n // 2, n - 4} if n >= 13 else {2, n // 2, n - 3}
+        self._base = []
+        for r in range(n):
+            for c in range(n):
+                k = ["gocell"] + [cl for cl, on in (("top", r == 0), ("bottom", r == n - 1),
+                                                     ("left", c == 0), ("right", c == n - 1)) if on]
+                self._base.append(tuple(k + (["star"] if r in stars and c in stars else [])))
         cells = [w.Label("")] + [w.Label(c, layout=w.Layout(width=CELL, justify_content="center")) for c in COLS[:n]]
         for r in range(n):
             cells.append(w.Label(str(n - r), layout=w.Layout(width=CELL, justify_content="flex-end")))
             for c in range(n):
-                b = w.Button(description="", layout=w.Layout(width=CELL, height=CELL, padding="0", margin="0",
-                                                             border="1px solid #8b6914"))
-                b.style.button_color = WOOD
+                b = w.Button(description="", layout=w.Layout(width=CELL, height=CELL))
                 b.on_click(lambda _, a=r * n + c: self.click(a))
                 self.buttons.append(b)
                 cells.append(b)
@@ -49,7 +77,6 @@ class ClickGame:
     def reset(self):
         self.game = make_game(self.n, self.gc.komi, self.gc.backend)
         self.moves, self.last = [], None
-        self._shown = np.full(self.n * self.n, 9, dtype=np.int8)
         self.msg = ""
         self._advance()
 
@@ -98,14 +125,11 @@ class ClickGame:
 
     def _render(self):
         b = self.game.board.ravel()
-        for i in np.flatnonzero(b != self._shown):
-            btn = self.buttons[i]
-            btn.style.button_color = "black" if b[i] == BLACK else "white" if b[i] == WHITE else WOOD
-        self._shown = b.copy()
-        for i, btn in enumerate(self.buttons):  # red border on the last move
-            border = "3px solid red" if i == self.last else "1px solid #8b6914"
-            if btn.layout.border != border:
-                btn.layout.border = border
+        for i, btn in enumerate(self.buttons):
+            st = ("b",) if b[i] == BLACK else ("w",) if b[i] == WHITE else ("e",)
+            cls = self._base[i] + st + (("last",) if i == self.last else ())
+            if tuple(btn._dom_classes) != cls:
+                btn._dom_classes = cls
         you = "Black" if self.me == BLACK else "White"
         last = f"last move: {self._name(self.moves[-1])} ({'B' if len(self.moves) % 2 else 'W'})" if self.moves else ""
         if self._over():
@@ -120,5 +144,5 @@ class ClickGame:
 
     def show(self):
         from IPython.display import display
-        display(self.w.VBox([self.status, self.grid, self.new_btn]))
+        display(self.w.VBox([self.w.HTML(CSS), self.status, self.grid, self.new_btn]))
         return self

@@ -34,9 +34,9 @@ def draw_board(board: np.ndarray, ax=None, last_move: int | None = None, title: 
         for r, c in [(2, 2), (2, 6), (6, 2), (6, 6), (4, 4)]:
             ax.plot(c, n - 1 - r, "k.", ms=6, zorder=1)
     rs, cs = np.nonzero(board == BLACK)
-    ax.scatter(cs, n - 1 - rs, s=3000 / n * 3, c="black", edgecolors="black", zorder=2)
+    ax.scatter(cs, n - 1 - rs, s=3000 / n * 3 * 0.64, c="black", edgecolors="black", zorder=2)
     rs, cs = np.nonzero(board == WHITE)
-    ax.scatter(cs, n - 1 - rs, s=3000 / n * 3, c="white", edgecolors="black", zorder=2)
+    ax.scatter(cs, n - 1 - rs, s=3000 / n * 3 * 0.64, c="white", edgecolors="black", zorder=2)
     if last_move is not None and last_move < n * n:
         r, c = divmod(last_move, n)
         ax.scatter([c], [n - 1 - r], s=60, c="red", zorder=3)
