@@ -81,6 +81,22 @@ def load_value_head(model: PPONet, vh):
             p.copy_(torch.as_tensor(w))
 
 
+def save_full(path: str, model: PPONet, extra: dict | None = None) -> None:
+    """Whole trained network (policy + value head) as a torch state_dict, for analysis."""
+    torch.save({"cfg": asdict(model.cfg), "state_dict": model.state_dict(), "extra": extra or {}}, path)
+
+
+def load_full(path: str) -> PPONet:
+    """Load a ``save_full`` file: ``net(x) -> (move logits (B, N*N+1), value (B,))``, eval mode.
+
+    ``net.pi`` is the policy alone (same module as ``Player(genome, cfg).net``)."""
+    d = torch.load(path, weights_only=False)
+    net = PPONet(NetConfig(**d["cfg"]))
+    net.load_state_dict(d["state_dict"])
+    net.extra = d.get("extra", {})
+    return net.eval()
+
+
 # ----------------------------------------------------------------------------- rollouts
 def allowed_moves(game, legal, gc: GameConfig):
     """Same move rules as match.play_game (gc must be resolved)."""
@@ -360,6 +376,7 @@ def main(argv=None):
     finals = (opp_pool[-3:] + [model.genome()])[-4:]
     save_population(f"{a.out}/final.pt", finals, net_cfg, [f"final{k}" for k in range(len(finals))],
                     {"it": it, "games": games_total, "hours": elapsed / 3600})
+    save_full(f"{a.out}/full.pt", model, {"it": it, "games": games_total, "hours": elapsed / 3600})
     pool.close()
     pool.join()
     print(f"done in {elapsed / 3600:.2f} h, {it} iterations, {games_total} games", flush=True)
