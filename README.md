@@ -136,6 +136,14 @@ Results after 2000 generations (selection run vs control run):
   * beats the 2d conv champions 81% of the time and the phase 3 champions 100%.
 * Report: [`runs/report/PHASE4.md`](runs/report/PHASE4.md).
 
+### Phase 5: PPO self-play baseline (branch `claude/phase5-rl`)
+* **Network:** the same phase 4 network (20.5k weights), plus a tiny value head used only in training. Pytorch on CPU.
+* **Training:** self-play against the current policy and a pool of past snapshots. Same budget: 8 h on 4 cores (72.6k games). Command: `python -m goevo.ppo --out work/p5_s0 --hours 8`.
+* **Result:**
+  * after 1 h it already beats the final phase 4 evolved parents;
+  * the final policies win 100% against the phase 4, 2d and 3 champions and the random mover.
+* Report: [`runs/report/PHASE5.md`](runs/report/PHASE5.md).
+
 Details: [`runs/report/REPORT.md`](runs/report/REPORT.md). Notebook: `notebooks/phase2_colab.ipynb`.
 
 **Checkpoints and repo size:** `*.pt` files are git-ignored. Only each run's final parents checkpoint is committed (force-added).
