@@ -10,7 +10,8 @@ from .match import GameConfig
 from .player import load_population
 
 
-def main(run="work/p5_s0", ancestors=(0, 2, 4), workers=4, out_file="runs/report/phase5_eval.txt"):
+def main(run="work/p5_s0", ancestors=(0, 2, 4), workers=4, out_file="runs/report/phase5_eval.txt",
+         rm_games=0):
     fin, net, _, extra = load_population(f"{run}/final.pt")
     gc = GameConfig(board_size=19)
     out = []
@@ -36,8 +37,9 @@ def main(run="work/p5_s0", ancestors=(0, 2, 4), workers=4, out_file="runs/report
         if os.path.exists(path):
             pop, cfg_b, *_ = load_population(path)
             h2h(label, pop, cfg_b)
-    wr, n = vs_random_mover(fin, net, gc, games_each=100, workers=workers)
-    log(f"vs {'random mover':<24} {wr:.3f} ± {(wr * (1 - wr) / n) ** 0.5:.3f}  (n={n})")
+    if rm_games:  # the random mover is no longer informative: off by default
+        wr, n = vs_random_mover(fin, net, gc, games_each=rm_games, workers=workers)
+        log(f"vs {'random mover':<24} {wr:.3f} ± {(wr * (1 - wr) / n) ** 0.5:.3f}  (n={n})")
     os.makedirs("runs/report", exist_ok=True)
     open(out_file, "w").write("\n".join(out) + "\n")
 
