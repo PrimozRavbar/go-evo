@@ -1,0 +1,8 @@
+phase 4 (work/p4_s0), final generation 4000. Win rate of the final parents (all pairings x both colours)
+vs own gen 0              0.938 ± 0.043  (n=32)
+vs own gen 1000           0.625 ± 0.086  (n=32)
+vs own gen 2000           0.938 ± 0.043  (n=32)
+vs own gen 3000           0.812 ± 0.069  (n=32)
+vs 2d conv champions      0.812 ± 0.069  (n=32)
+vs 3 low-rank champions   1.000 ± 0.000  (n=32)
+vs random mover           1.000 ± 0.000  (n=400)

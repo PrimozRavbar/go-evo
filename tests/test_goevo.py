@@ -253,3 +253,62 @@ def test_conv_evolution_smoke(tmp_path):
     assert len(hist) == 3 and hist[-1]["n_winners"] == 2
     genomes, cfg, *_ = load_population(str(tmp_path / "gen0002.pt"))
     assert cfg.arch == "conv" and genomes[0].size == net.genome_size
+
+
+def test_lowrank_net_matches_torch_and_size():
+    from goevo.player import encode_state, random_genome, Player, layer_scales
+    from goevo.fastgo import FastGo
+    cfg = NetConfig(board_size=19, arch="lowrank", num_layers=20, rank=32)
+    i, h, o = 4 * 361 + 1, 128, 362
+    assert cfg.genome_size == 32 * (h + i) + 18 * 32 * 2 * h + 32 * (o + h) + 19 * h + o
+    g = random_genome(cfg, np.random.default_rng(1))
+    assert g.size == layer_scales(cfg).size == cfg.genome_size
+    p = Player(g, cfg)
+    x = encode_state(FastGo(19), FastGo(19).legal_mask(), 1083)
+    np.testing.assert_allclose(p.logits(x), p.logits_torch(x), rtol=1e-4, atol=1e-4)
+    # each W = A @ B has rank <= r
+    A = g[:h * 32].reshape(h, 32)
+    B = g[h * 32:h * 32 + 32 * i].reshape(32, i)
+    assert np.linalg.matrix_rank(A @ B) == 32
+
+
+def test_lowrank_evolution_smoke(tmp_path):
+    from goevo import load_population
+    from goevo.evolve import EvoConfig, run_evolution
+    net = NetConfig(board_size=9, arch="lowrank", num_layers=4, hidden=16, rank=4)
+    evo = EvoConfig(pop_size=8, n_parents=2, generations=2, external_top=2, hof_games=2,
+                    bench_every=0, checkpoint_every=0, state_every=0, out_dir=str(tmp_path), workers=1)
+    hist = run_evolution(evo, net, GameConfig(board_size=9, backend="fast"), verbose=False)
+    assert len(hist) == 3
+    genomes, cfg, *_ = load_population(str(tmp_path / "gen0002.pt"))
+    assert cfg.arch == "lowrank" and cfg.rank == 4 and genomes[0].size == net.genome_size
+
+
+def test_resnet_matches_torch_and_starts_as_identity_ish():
+    from goevo.player import encode_planes, random_genome, Player, layer_scales
+    from goevo.fastgo import FastGo
+    cfg = NetConfig(board_size=19, arch="resnet", channels=16, blocks=4)
+    C, P = 16, 11
+    conv = lambda cin: C * cin * 9 + C
+    assert cfg.genome_size == conv(P) + 4 * (2 * conv(C) + 4 * C) + 2 * C + (C + 1) * 2
+    g = random_genome(cfg, np.random.default_rng(2))
+    assert g.size == layer_scales(cfg).size == cfg.genome_size
+    p = Player(g, cfg)
+    f = FastGo(19)
+    rng = np.random.default_rng(0)
+    for _ in range(60):
+        f.play(int(rng.choice(np.flatnonzero(f.legal_mask()[:-1]))))
+    x = encode_planes(f, f.legal_mask())
+    np.testing.assert_allclose(p.logits(x), p.logits_torch(x), rtol=1e-4, atol=1e-4)
+    assert (p._layers[2] == 1).all() and (p._layers[3] == 0).all()   # first norm: gain 1, bias 0
+
+
+def test_resnet_evolution_smoke(tmp_path):
+    from goevo import load_population
+    from goevo.evolve import EvoConfig, run_evolution
+    net = NetConfig(board_size=9, arch="resnet", channels=4, blocks=2)
+    evo = EvoConfig(pop_size=8, n_parents=2, generations=2, external_top=2, hof_games=2,
+                    bench_every=0, checkpoint_every=0, state_every=0, out_dir=str(tmp_path), workers=1)
+    run_evolution(evo, net, GameConfig(board_size=9, backend="fast"), verbose=False)
+    genomes, cfg, *_ = load_population(str(tmp_path / "gen0002.pt"))
+    assert cfg.arch == "resnet" and cfg.blocks == 2 and genomes[0].size == net.genome_size
