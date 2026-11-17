@@ -10,7 +10,7 @@ from .match import GameConfig
 from .player import load_population
 
 
-def main(run="work/p5_s0", ancestors=(0, 2, 4), workers=4):
+def main(run="work/p5_s0", ancestors=(0, 2, 4), workers=4, out_file="runs/report/phase5_eval.txt"):
     fin, net, _, extra = load_population(f"{run}/final.pt")
     gc = GameConfig(board_size=19)
     out = []
@@ -28,7 +28,9 @@ def main(run="work/p5_s0", ancestors=(0, 2, 4), workers=4):
         p = f"{run}/h{h:02d}.pt"
         if os.path.exists(p):
             h2h(f"own hour {h}", load_population(p)[0])
-    for label, path in [("phase 4 evolved parents", "runs/p4_s0/gen4000.pt"),
+    others = [] if os.path.abspath(run) == os.path.abspath("runs/p5_s0") or run.endswith("p5_s0") else \
+        [("phase 5 PPO (small net)", "runs/p5_s0/final.pt")]
+    for label, path in others + [("phase 4 evolved parents", "runs/p4_s0/gen4000.pt"),
                         ("2d conv champions", "runs/d_sel_s0/gen1000.pt"),
                         ("3 low-rank champions", "runs/p3_r32_s0/gen10000.pt")]:
         if os.path.exists(path):
@@ -37,8 +39,8 @@ def main(run="work/p5_s0", ancestors=(0, 2, 4), workers=4):
     wr, n = vs_random_mover(fin, net, gc, games_each=100, workers=workers)
     log(f"vs {'random mover':<24} {wr:.3f} ± {(wr * (1 - wr) / n) ** 0.5:.3f}  (n={n})")
     os.makedirs("runs/report", exist_ok=True)
-    open("runs/report/phase5_eval.txt", "w").write("\n".join(out) + "\n")
+    open(out_file, "w").write("\n".join(out) + "\n")
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:2])
+    main(*sys.argv[1:2])  # e.g. python -c "from goevo.eval_phase5 import main; main('work/p5b_s0', (0, 2, 4, 6), out_file='runs/report/phase5b_eval.txt')"

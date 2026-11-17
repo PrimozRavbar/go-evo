@@ -81,6 +81,22 @@ def load_value_head(model: PPONet, vh):
             p.copy_(torch.as_tensor(w))
 
 
+def save_full(path: str, model: PPONet, extra: dict | None = None) -> None:
+    """Whole trained network (policy + value head) as a torch state_dict, for analysis."""
+    torch.save({"cfg": asdict(model.cfg), "state_dict": model.state_dict(), "extra": extra or {}}, path)
+
+
+def load_full(path: str) -> PPONet:
+    """Load a ``save_full`` file: ``net(x) -> (move logits (B, N*N+1), value (B,))``, eval mode.
+
+    ``net.pi`` is the policy alone (same module as ``Player(genome, cfg).net``)."""
+    d = torch.load(path, weights_only=False)
+    net = PPONet(NetConfig(**d["cfg"]))
+    net.load_state_dict(d["state_dict"])
+    net.extra = d.get("extra", {})
+    return net.eval()
+
+
 # ----------------------------------------------------------------------------- rollouts
 def allowed_moves(game, legal, gc: GameConfig):
     """Same move rules as match.play_game (gc must be resolved)."""
@@ -107,9 +123,29 @@ def _sample(z, allowed, rng):
     return a, float(np.log(p[a]))
 
 
+def _sym(x, k):
+    """k-th of the 8 board symmetries (k//4: mirror, k%4: quarter turns) on the last two axes."""
+    if k >= 4:
+        x = x[..., ::-1]
+    return np.rot90(x, k % 4, axes=(-2, -1))
+
+
+_PERMS = {}
+
+
+def sym_perm(n, k):
+    """perm[j] = original point shown at point j of the transformed board."""
+    if (n, k) not in _PERMS:
+        _PERMS[n, k] = np.ascontiguousarray(_sym(np.arange(n * n).reshape(n, n), k)).ravel()
+    return _PERMS[n, k]
+
+
 def _rollout(job):
-    """One game. Returns the learner-side trajectories (one, or two when opponent is self)."""
-    pol, vh, opp, lcol, seed, net_cfg, gc = job
+    """One game. Returns the learner-side trajectories (one, or two when opponent is self).
+
+    With ``sym``, every move is decided on a randomly rotated / mirrored board and stored
+    in that orientation (exact PPO data, all 8 orientations seen in training)."""
+    pol, vh, opp, lcol, seed, net_cfg, gc, sym = job
     rng = np.random.default_rng(seed)
     me = PPONet(net_cfg).eval()
     me.set_genome(pol)
@@ -126,12 +162,18 @@ def _rollout(job):
             allowed = allowed_moves(game, legal, gc)
             c = game.to_play
             x = encode_planes(game, legal)
+            n = gc.board_size
+            if sym:
+                k = int(rng.integers(8))
+                perm = sym_perm(n, k)
+                x = np.ascontiguousarray(_sym(x, k))
+                allowed = np.append(allowed[:-1][perm], allowed[-1])
             learner = other is None or c == lcol
             z, v = (me if learner else other)(torch.from_numpy(x)[None])
             a, lp = _sample(z[0].numpy(), allowed, rng)
             if learner:
                 traj[c].append((x.astype(np.int8), allowed, a, lp, float(v[0])))
-            game.play(a)
+            game.play(int(perm[a]) if sym and a < n * n else a)
     w = game.winner()
     out = []
     for c, steps in traj.items():
@@ -219,6 +261,7 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--channels", type=int, default=16)
     ap.add_argument("--blocks", type=int, default=4)
+    ap.add_argument("--sym", action="store_true", help="random board symmetry for every move (augmentation)")
     ap.add_argument("--games", type=int, default=32, help="games per iteration")
     ap.add_argument("--p-self", type=float, default=0.5, help="prob. opponent = current policy")
     ap.add_argument("--pool-size", type=int, default=50)
@@ -293,7 +336,7 @@ def main(argv=None):
         jobs = []
         for k in range(a.games):
             opp = None if rng.random() < a.p_self else opp_pool[int(rng.integers(len(opp_pool)))]
-            jobs.append((pol, vh, opp, 1 if k % 2 == 0 else -1, int(rng.integers(2 ** 31)), net_cfg, gc))
+            jobs.append((pol, vh, opp, 1 if k % 2 == 0 else -1, int(rng.integers(2 ** 31)), net_cfg, gc, a.sym))
         res = pool.map(_rollout, jobs, chunksize=1)
         t1 = time.time()
         trajs = [t for r in res for t in r[0]]
@@ -333,6 +376,7 @@ def main(argv=None):
     finals = (opp_pool[-3:] + [model.genome()])[-4:]
     save_population(f"{a.out}/final.pt", finals, net_cfg, [f"final{k}" for k in range(len(finals))],
                     {"it": it, "games": games_total, "hours": elapsed / 3600})
+    save_full(f"{a.out}/full.pt", model, {"it": it, "games": games_total, "hours": elapsed / 3600})
     pool.close()
     pool.join()
     print(f"done in {elapsed / 3600:.2f} h, {it} iterations, {games_total} games", flush=True)
