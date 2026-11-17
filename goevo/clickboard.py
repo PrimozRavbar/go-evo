@@ -38,6 +38,11 @@ CSS = """<style>
 .gocell.w { --stone: radial-gradient(circle at 42% 40%, #fff 0, #eee 7px, #bbb 10px, #666 10.5px, transparent 11.5px); }
 .gocell.last { --mark: radial-gradient(circle, #e01010 0 3.5px, transparent 4.5px); }
 .gocell.e:hover { --mark: radial-gradient(circle, rgba(0,0,0,0.28) 0 10px, transparent 11px); }
+.golab { margin: 0 !important; padding: 0 !important; height: 28px !important; min-height: 0 !important;
+  line-height: 28px !important; font: 11px sans-serif; color: #333; overflow: hidden; }
+.goboard { background-color: #dcb35c !important; gap: 0 !important; padding: 4px !important;
+  grid-auto-rows: 28px !important; align-items: stretch !important; width: max-content !important; }
+.goboard > * { margin: 0 !important; }
 </style>"""
 
 
@@ -58,16 +63,22 @@ class ClickGame:
                 k = ["gocell"] + [cl for cl, on in (("top", r == 0), ("bottom", r == n - 1),
                                                      ("left", c == 0), ("right", c == n - 1)) if on]
                 self._base.append(tuple(k + (["star"] if r in stars and c in stars else [])))
-        cells = [w.Label("")] + [w.Label(c, layout=w.Layout(width=CELL, justify_content="center")) for c in COLS[:n]]
+        lab = lambda t, just: w.Label(t, layout=w.Layout(width=CELL, height=CELL, margin="0", justify_content=just))
+        cells = [lab("", "center")] + [lab(c, "center") for c in COLS[:n]]
         for r in range(n):
-            cells.append(w.Label(str(n - r), layout=w.Layout(width=CELL, justify_content="flex-end")))
+            cells.append(lab(str(n - r), "center"))
             for c in range(n):
                 b = w.Button(description="", layout=w.Layout(width=CELL, height=CELL))
                 b.on_click(lambda _, a=r * n + c: self.click(a))
                 self.buttons.append(b)
                 cells.append(b)
+        for x in cells:
+            if isinstance(x, w.Label):
+                x.add_class("golab")
         self.grid = w.GridBox(cells, layout=w.Layout(grid_template_columns=f"repeat({n + 1}, {CELL})",
+                                                     grid_template_rows=f"repeat({n + 1}, {CELL})",
                                                      grid_gap="0px"))
+        self.grid.add_class("goboard")
         self.status = w.HTML()
         self.new_btn = w.Button(description="New game", button_style="info")
         self.new_btn.on_click(lambda _: self.reset())
