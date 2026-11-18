@@ -295,6 +295,8 @@ def main(argv=None):
         model.load_state_dict(st["model"])
         opt = torch.optim.Adam(model.parameters(), lr=a.lr)
         opt.load_state_dict(st["opt"])
+        for g in opt.param_groups:  # the command-line learning rate wins (e.g. lower it on resume)
+            g["lr"] = a.lr
         it, elapsed, games_total, steps_total = st["it"], st["elapsed"], st["games"], st["steps"]
         opp_pool, next_ckpt = st["pool"], st["next_ckpt"]
         rng.bit_generator.state = st["rng"]
@@ -302,7 +304,7 @@ def main(argv=None):
         hist = [h for h in hist if h["it"] < it]
         with open(f"{a.out}/history.jsonl", "w") as f:
             f.writelines(json.dumps(h) + "\n" for h in hist)
-        print(f"resumed at iteration {it}, {elapsed / 3600:.2f} h used", flush=True)
+        print(f"resumed at iteration {it}, {elapsed / 3600:.2f} h used, lr {a.lr}", flush=True)
     else:
         model.set_genome(random_genome(net_cfg, rng))  # same init distribution as evolution
         opt = torch.optim.Adam(model.parameters(), lr=a.lr)
