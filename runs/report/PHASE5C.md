@@ -37,7 +37,7 @@ vs small PPO hour 3 ( 26496 games): 1.000 (n=8)
 vs small PPO hour 4 ( 35392 games): 0.875 (n=8)
 vs small PPO hour 5 ( 44384 games): 0.625 (n=8)
 vs small PPO hour 6 ( 54016 games): 0.750 (n=8)
-vs small PPO hour 7 ( 63424 games): (running)
+vs small PPO hour 7 ( 63424 games): 0.625 (n=8)
 
 hourly 5c snapshot vs the small PPO final (n=8 each)
 hour 11 (22.6k games) 0.375   hour 13 (26.7k) 0.375   hour 14 (28.9k) 0.125
@@ -52,7 +52,7 @@ Play is deterministic (masked argmax), with every pairing played with both colou
   - The policy change per update (KL) dropped from about 0.020 to 0.008–0.010, below the small network's 0.012.
   - The final policies beat the 5b final (hour 8) 8 of 8.
   - Entropy fell faster: from about 2.5 to about 1.9 within 10k games, below the small network's 2.2. The policy became more decided.
-- **Per game, it is still about even with the small network or a little worse.** With 42.4k games it beats the small network's 35k-game snapshot 7 of 8 times. Against its 44k- and 54k-game snapshots it wins 5 and 6 of 8. See the equal-games table for the 63k-game snapshot.
+- **Per game, it is now about even with the small network, maybe a little ahead.** With 42.4k games it beats the small network's 35k-game snapshot 7 of 8 times. It also wins 5, 6 and 5 of 8 against the 44k-, 54k- and 63k-game snapshots, which had more games than it did. In phase 5b it was about 1.25× *less* efficient per game; the lower learning rate made up the difference.
 - **Per hour, it costs 2.5× more:** 20 h for the big network versus 8 h for the small one.
 - **Progress is slowing:** the final policies only split evenly with the 17 h and 19 h snapshots. The hourly snapshots against the small final also swing a lot (0 to 4 of 8). With deterministic play and 8 games per comparison, much of that is noise.
 - **Possible next steps:**

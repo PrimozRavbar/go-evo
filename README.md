@@ -151,6 +151,13 @@ Results after 2000 generations (selection run vs control run):
   * loses all games to the small PPO, and also learns less per game;
   * needs roughly 20–30 h to catch up.
 * Report: [`runs/report/PHASE5B.md`](runs/report/PHASE5B.md).
+
+### Phase 5c: the bigger PPO network, continued at a lower learning rate (branch `claude/phase5c-ppo-lr`)
+* Resumes phase 5b for 12 more hours (20 h, 42.4k games in total), with lr 1e-4 instead of 3e-4; nothing else changed. Command: `python -m goevo.ppo --channels 32 --blocks 6 --sym --hours 20 --lr 1e-4 --resume`.
+* **Result:**
+  * beats the small PPO's final policies 22 of 32 (69%);
+  * about even with it per game, but 2.5× more CPU time.
+* Report: [`runs/report/PHASE5C.md`](runs/report/PHASE5C.md).
 * Watch and play games (PPO, evolved players, random, you): `notebooks/games_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_colab.ipynb)
 * Play against them by clicking on the board: `notebooks/games_click_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_click_colab.ipynb)
 * Train PPO yourself, every step written out in the notebook: `notebooks/ppo_training_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/ppo_training_colab.ipynb)

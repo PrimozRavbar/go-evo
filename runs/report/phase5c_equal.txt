@@ -1,0 +1,6 @@
+equal games: 5c final (42400 games) vs the small PPO hourly snapshots
+vs small PPO hour 3 ( 26496 games): 1.000 (n=8)
+vs small PPO hour 4 ( 35392 games): 0.875 (n=8)
+vs small PPO hour 5 ( 44384 games): 0.625 (n=8)
+vs small PPO hour 6 ( 54016 games): 0.750 (n=8)
+vs small PPO hour 7 ( 63424 games): 0.625 (n=8)
