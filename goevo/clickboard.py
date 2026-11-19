@@ -15,6 +15,7 @@ import numpy as np
 from .engine import BLACK, WHITE, make_game
 from .match import GameConfig
 from .ppo import allowed_moves
+from .scoring import count, owners
 
 COLS = "ABCDEFGHJKLMNOPQRST"
 CELL = "28px"
@@ -22,12 +23,12 @@ CELL = "28px"
 # Each button is one intersection: CSS draws the two grid lines through its centre (half lines
 # on the edges), the star points, the stone (80% of the line spacing) and a red dot on the last move.
 CSS = """<style>
-.gocell { --mark: none; --stone: none;
+.gocell { --mark: none; --stone: none; --area: none;
   --vs: 1px 100%; --vp: center center; --hs: 100% 1px; --hp: center center;
   background-color: #dcb35c !important;
-  background-image: var(--mark), var(--stone), linear-gradient(#333, #333), linear-gradient(#333, #333) !important;
-  background-size: 100% 100%, 100% 100%, var(--vs), var(--hs) !important;
-  background-position: center, center, var(--vp), var(--hp) !important;
+  background-image: var(--mark), var(--stone), var(--area), linear-gradient(#333, #333), linear-gradient(#333, #333) !important;
+  background-size: 100% 100%, 100% 100%, 9px 9px, var(--vs), var(--hs) !important;
+  background-position: center, center, center, var(--vp), var(--hp) !important;
   background-repeat: no-repeat !important;
   border: none !important; box-shadow: none !important; outline: none !important;
   padding: 0 !important; margin: 0 !important; min-width: 0 !important; border-radius: 0 !important; }
@@ -38,6 +39,8 @@ CSS = """<style>
 .gocell.star   { --stone: radial-gradient(circle, #333 0 2.5px, transparent 3.5px); }
 .gocell.b { --stone: radial-gradient(circle at 42% 40%, #555 0, #111 7px, #000 10.5px, transparent 11.5px); }
 .gocell.w { --stone: radial-gradient(circle at 42% 40%, #fff 0, #eee 7px, #bbb 10px, #666 10.5px, transparent 11.5px); }
+.gocell.ab { --area: linear-gradient(#111, #111); }
+.gocell.aw { --area: linear-gradient(#fff, #fff); outline: 1px solid #555 !important; outline-offset: -9.5px; }
 .gocell.last { --mark: radial-gradient(circle, #e01010 0 3.5px, transparent 4.5px); }
 .gocell.e:hover { --mark: radial-gradient(circle, rgba(0,0,0,0.28) 0 10px, transparent 11px); }
 .golab { margin: 0 !important; padding: 0 !important; height: 28px !important; min-height: 0 !important;
@@ -88,6 +91,9 @@ class ClickGame:
         self.pass_btn.on_click(lambda _: self.human_pass())
         self.end_btn = w.Button(description="End and score", button_style="warning")
         self.end_btn.on_click(lambda _: self.end_and_score())
+        self.area_box = w.Checkbox(value=False, description="Show area", indent=False,
+                                   layout=w.Layout(width="110px"))
+        self.area_box.observe(lambda _: self._render(), names="value")
         self.reset()
 
     # ------------------------------------------------------------------ game flow
@@ -159,9 +165,12 @@ class ClickGame:
         return "pass" if a == self.n * self.n else f"{COLS[a % self.n]}{self.n - a // self.n}"
 
     def _render(self):
-        b = self.game.board.ravel()
+        board = self.game.board
+        b = board.ravel()
+        own = owners(board, board.size // 4).ravel() if self.area_box.value else np.zeros_like(b)
         for i, btn in enumerate(self.buttons):
-            st = ("b",) if b[i] == BLACK else ("w",) if b[i] == WHITE else ("e",)
+            st = ("b",) if b[i] == BLACK else ("w",) if b[i] == WHITE else \
+                 ("e", "ab") if own[i] == BLACK else ("e", "aw") if own[i] == WHITE else ("e",)
             cls = self._base[i] + st + (("last",) if i == self.last else ())
             if tuple(btn._dom_classes) != cls:
                 btn._dom_classes = cls
@@ -175,11 +184,13 @@ class ClickGame:
             head = f"<b>{how}: {res}. {'You win!' if won else 'You lose.' if s != 0 else 'Draw.'}</b>"
         else:
             head = f"You play <b>{you}</b> vs <b>{self.ai.name}</b>. Your move."
+        cnt = count(board, self.gc.komi).text()
         self.status.value = (f"{head}<br>move {self.game.move_number} &nbsp; {last}"
+                             f"<br><span style='color:#555'>count: {cnt}</span>"
                              f"<br><span style='color:#b00'>{self.msg}</span>")
 
     def show(self):
         from IPython.display import display
         display(self.w.VBox([self.w.HTML(CSS), self.status, self.grid,
-                             self.w.HBox([self.pass_btn, self.end_btn, self.new_btn])]))
+                             self.w.HBox([self.pass_btn, self.end_btn, self.new_btn, self.area_box])]))
         return self
