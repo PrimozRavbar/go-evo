@@ -165,6 +165,13 @@ Results after 2000 generations (selection run vs control run):
   * beats the 5c final 21 of 32 and the small PPO final 19 of 32 (59%);
   * mostly a plateau, only slightly stronger than the small network at a similar number of games.
 * Report: [`runs/report/PHASE5D.md`](runs/report/PHASE5D.md).
+
+### Phase 5e: bigger batches and a lower learning rate for the bigger PPO network (branch `claude/phase5e-ppo-bigbatch`)
+* Continues phase 5d to 48 h (95.3k games) with 64 games per iteration, lr 5e-5 and minibatch 2048. Command: `python -m goevo.ppo --channels 32 --blocks 6 --sym --hours 48 --games 64 --lr 5e-5 --minibatch 2048 --resume`.
+* **Result:**
+  * beats the 5d final 7 of 8 at first; all 4 x 4 final policies, 18 of 32;
+  * against the small PPO final, still only 19 of 32 (59%); plateau again after about 6 h.
+* Report: [`runs/report/PHASE5E.md`](runs/report/PHASE5E.md).
 * Watch and play games (PPO, evolved players, random, you): `notebooks/games_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_colab.ipynb)
 * Play against them by clicking on the board: `notebooks/games_click_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_click_colab.ipynb)
 * Train PPO yourself, every step written out in the notebook: `notebooks/ppo_training_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/ppo_training_colab.ipynb)

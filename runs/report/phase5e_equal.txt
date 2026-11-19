@@ -1,0 +1,4 @@
+equal games: 5e final (95328 games) vs the small PPO hourly snapshots
+vs small PPO hour 6 ( 54016 games): 0.500 (n=8)
+vs small PPO hour 7 ( 63424 games): 0.875 (n=8)
+5e final vs 5d final (65952 games): 0.562 (n=32)
