@@ -11,7 +11,7 @@ from .player import load_population
 
 
 def main(run="work/p5_s0", ancestors=(0, 2, 4), workers=4, out_file="runs/report/phase5_eval.txt",
-         rm_games=0):
+         rm_games=0, evo=False):
     fin, net, _, extra = load_population(f"{run}/final.pt")
     gc = GameConfig(board_size=19)
     out = []
@@ -31,9 +31,10 @@ def main(run="work/p5_s0", ancestors=(0, 2, 4), workers=4, out_file="runs/report
             h2h(f"own hour {h}", load_population(p)[0])
     others = [] if os.path.abspath(run) == os.path.abspath("runs/p5_s0") or run.endswith("p5_s0") else \
         [("phase 5 PPO (small net)", "runs/p5_s0/final.pt")]
-    for label, path in others + [("phase 4 evolved parents", "runs/p4_s0/gen4000.pt"),
-                        ("2d conv champions", "runs/d_sel_s0/gen1000.pt"),
-                        ("3 low-rank champions", "runs/p3_r32_s0/gen10000.pt")]:
+    evo_refs = [("phase 4 evolved parents", "runs/p4_s0/gen4000.pt"),
+                ("2d conv champions", "runs/d_sel_s0/gen1000.pt"),
+                ("3 low-rank champions", "runs/p3_r32_s0/gen10000.pt")] if evo else []
+    for label, path in others + evo_refs:
         if os.path.exists(path):
             pop, cfg_b, *_ = load_population(path)
             h2h(label, pop, cfg_b)
