@@ -29,7 +29,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .engine import EMPTY, GoGame
+from .engine import BLACK, EMPTY, GoGame
 
 NUM_FEATURE_PLANES = 4  # MLP: own stones, opponent stones, empty, legal-for-me
 # conv: own, opponent, empty, legal, own group with 1 / 2 / >=3 liberties,
@@ -47,13 +47,14 @@ class NetConfig:
     channels: int = 16         # conv: channels of every conv layer
     rank: int = 32             # lowrank: rank r of every W = A @ B
     blocks: int = 4            # resnet: residual blocks (2 convs each)
+    extra_planes: int = 0      # resnet: 2 adds "opponent just passed" and "I am Black" (phase 6, free passing)
 
     def param_blocks(self) -> list[tuple]:
         """[(shape, init std[, init mean, mutation scale])] of every parameter tensor, in
         genome order. Mutation scale defaults to the init std."""
         gain = _GAIN[self.activation]
         if self.arch == "resnet":
-            C, P = self.channels, CONV_PLANES
+            C, P = self.channels, CONV_PLANES + self.extra_planes
             conv = lambda cin, k=1.0: [((C, cin, 3, 3), k * gain / np.sqrt(cin * 9), 0.0,
                                         gain / np.sqrt(cin * 9)),
                                        ((C,), 0.1 * k, 0.0, 0.1)]
@@ -154,7 +155,7 @@ class ResNet(nn.Module):
     def __init__(self, cfg: NetConfig):
         super().__init__()
         C, act = cfg.channels, _ACT[cfg.activation]()
-        self.stem = nn.Conv2d(CONV_PLANES, C, 3, padding=1)
+        self.stem = nn.Conv2d(CONV_PLANES + cfg.extra_planes, C, 3, padding=1)
         self.blocks = nn.ModuleList([ResBlock(C, act) for _ in range(cfg.blocks)])
         self.norm = nn.GroupNorm(1, C)
         self.point = nn.Conv2d(C, 1, 1)
@@ -213,13 +214,16 @@ def encode_state(game: GoGame, legal: np.ndarray, max_moves: int) -> np.ndarray:
     return np.append(x, progress)
 
 
-def encode_planes(game: GoGame, legal: np.ndarray) -> np.ndarray:
-    """(CONV_PLANES, N, N) float32 features for the conv net, from the mover's view."""
+def encode_planes(game: GoGame, legal: np.ndarray, extra: int = 0) -> np.ndarray:
+    """(CONV_PLANES + extra, N, N) float32 features for the conv net, from the mover's view.
+
+    ``extra=2`` (phase 6) adds a plane of ones if the opponent just passed (passing now
+    ends the game) and a plane of ones if the mover is Black (komi decides who is ahead)."""
     b = game.board
     me = game.to_play
     libs = game.liberty_map()
     mine, theirs = b == me, b == -me
-    x = np.empty((CONV_PLANES,) + b.shape, dtype=np.float32)
+    x = np.empty((CONV_PLANES + extra,) + b.shape, dtype=np.float32)
     x[0], x[1], x[2] = mine, theirs, b == EMPTY
     x[3] = legal[:-1].reshape(b.shape)
     for k, own in ((4, mine), (7, theirs)):
@@ -227,6 +231,9 @@ def encode_planes(game: GoGame, legal: np.ndarray) -> np.ndarray:
         x[k + 1] = own & (libs == 2)
         x[k + 2] = own & (libs >= 3)
     x[10] = 1.0
+    if extra:
+        x[11] = float(getattr(game, "_passes", 0) > 0)
+        x[12] = float(me == BLACK)
     return x
 
 
@@ -336,7 +343,7 @@ class Player:
                     max_moves: int, temperature: float = 0.0,
                     rng: np.random.Generator | None = None) -> int:
         """Masked argmax (temperature 0) or softmax sampling over ``allowed``."""
-        feats = encode_planes(game, legal) if self.cfg.arch in ("conv", "resnet") else encode_state(game, legal, max_moves)
+        feats = encode_planes(game, legal, self.cfg.extra_planes) if self.cfg.arch in ("conv", "resnet") else encode_state(game, legal, max_moves)
         z = self.logits(feats).astype(np.float64)
         z[~allowed] = -np.inf
         if temperature <= 0:

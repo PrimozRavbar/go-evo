@@ -32,7 +32,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .engine import make_game
-from .match import GameConfig, own_eye_mask
+from .match import CHINESE, GameConfig, own_eye_mask
 from .parallel import _play
 from .player import NetConfig, ResNet, encode_planes, random_genome, save_population
 
@@ -107,6 +107,8 @@ def allowed_moves(game, legal, gc: GameConfig):
     stone = allowed[:-1].any()
     if gc.pass_rule == "forced":
         allowed[-1] = not stone
+    elif gc.pass_rule == "free":  # normal Go: pass whenever you like
+        allowed[-1] = True
     else:
         allowed[-1] = (game.move_number >= gc.min_moves_before_pass) or not stone
     if not allowed.any():
@@ -161,7 +163,7 @@ def _rollout(job):
             legal = game.legal_mask()
             allowed = allowed_moves(game, legal, gc)
             c = game.to_play
-            x = encode_planes(game, legal)
+            x = encode_planes(game, legal, net_cfg.extra_planes)
             n = gc.board_size
             if sym:
                 k = int(rng.integers(8))
@@ -281,11 +283,15 @@ def main(argv=None):
     ap.add_argument("--save-every", type=int, default=5, help="iterations between state.pt saves")
     ap.add_argument("--max-iters", type=int, default=0, help="stop after this many iterations (0 = no limit)")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--rules", choices=["forced", "chinese"], default="forced",
+                    help="forced: phases 1-5 (pass only when nothing else is legal, never fill own eye); "
+                         "chinese: phase 6 (pass any time, two passes end, area scoring, komi 7.5)")
     a = ap.parse_args(argv)
 
     os.makedirs(a.out, exist_ok=True)
-    net_cfg = NetConfig(board_size=19, arch="resnet", channels=a.channels, blocks=a.blocks)
-    gc = GameConfig(board_size=19).resolved()
+    net_cfg = NetConfig(board_size=19, arch="resnet", channels=a.channels, blocks=a.blocks,
+                        extra_planes=2 if a.rules == "chinese" else 0)
+    gc = (CHINESE if a.rules == "chinese" else GameConfig(board_size=19)).resolved()
     rng = np.random.default_rng(a.seed)
     torch.manual_seed(a.seed)
     model = PPONet(net_cfg)
