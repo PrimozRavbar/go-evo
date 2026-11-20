@@ -126,6 +126,8 @@ class ClickGame:
                 self._play(self.n * self.n)
                 continue
             a = self.ai.select_move(self.game, allowed, legal, self.gc.max_moves, self.temperature, self.rng)
+            if a == self.n * self.n:
+                self.msg = "The network passed."
             self._play(a)
         self._render()
 
@@ -134,7 +136,8 @@ class ClickGame:
             return
         _, allowed = self._allowed()
         if not allowed[a]:
-            self.msg = f"{self._name(a)} is not allowed (occupied, suicide, ko or your own eye)."
+            eye = " or your own eye" if self.gc.forbid_own_eye_fill else ""
+            self.msg = f"{self._name(a)} is not allowed (occupied, suicide, ko{eye})."
             self._render()
             return
         self.msg = ""
