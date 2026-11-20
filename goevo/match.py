@@ -14,7 +14,8 @@ class GameConfig:
     komi: float = 7.5
     backend: str = "auto"          # auto | pettingzoo | native
     max_moves: int | None = None   # hard cap; default 3 * N * N (1083 on 19x19, 243 on 9x9)
-    pass_rule: str = "forced"      # "forced": pass only if no other move | "after_min": pass allowed after min_moves_before_pass
+    pass_rule: str = "forced"      # "forced": pass only if no other move | "free": pass any time (normal Go)
+                                   # | "after_min": pass allowed after min_moves_before_pass
     min_moves_before_pass: int | None = None  # only for pass_rule="after_min"; default N*N//2
     forbid_own_eye_fill: bool = True  # never fill your own single-point eye
     temperature: float = 0.0       # 0 = deterministic argmax
@@ -26,6 +27,12 @@ class GameConfig:
                           self.pass_rule,
                           self.min_moves_before_pass if self.min_moves_before_pass is not None else n2 // 2,
                           self.forbid_own_eye_fill, self.temperature)
+
+
+# Phase 6: normal computer-Go Chinese rules. Pass any time, two passes in a row end the game,
+# area scoring (stones + surrounded empty points), komi 7.5, filling your own eye allowed.
+# Simple ko only (no superko); the move cap ends any repeating cycle.
+CHINESE = GameConfig(board_size=19, komi=7.5, pass_rule="free", forbid_own_eye_fill=False)
 
 
 @dataclass
@@ -122,6 +129,8 @@ def play_game(black, white, cfg: GameConfig = GameConfig(), rng: np.random.Gener
         stone_moves = allowed[:-1].any()
         if cfg.pass_rule == "forced":  # pass only when nothing else is possible
             allowed[-1] = not stone_moves
+        elif cfg.pass_rule == "free":  # normal Go: pass whenever you like
+            allowed[-1] = True
         else:  # pass allowed late enough in the game
             allowed[-1] = (game.move_number >= cfg.min_moves_before_pass) or not stone_moves
         if not allowed.any():

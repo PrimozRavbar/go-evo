@@ -172,6 +172,14 @@ Results after 2000 generations (selection run vs control run):
   * beats the 5d final 7 of 8 at first; all 4 x 4 final policies, 18 of 32;
   * against the small PPO final, still only 19 of 32 (59%); plateau again after about 6 h.
 * Report: [`runs/report/PHASE5E.md`](runs/report/PHASE5E.md).
+
+### Phase 6: Chinese rules (branch `claude/phase6-chinese-rules`)
+* **New rules:** pass any time, two passes in a row end the game, own-eye filling allowed, area scoring, komi 7.5, move cap 1083 (`goevo.match.CHINESE`). Phases 1–5 used forced passing.
+* **Network:** the small phase 5 network (16 channels, 4 blocks) with 2 extra input planes (opponent just passed; mover is Black). Trained from scratch, 16 h, 96.6k games. Command: `python -m goevo.ppo --out work/p6_s0 --rules chinese --sym --hours 16`.
+* **Result:**
+  * the final policies beat the hour 0–6 snapshots 8 of 8, hours 8–10 7 of 8, hours 12–14 5 of 8, hour 15 4 of 8: gains slowing down at the end;
+  * games stay long (about 600 moves): they have not learned to end games early by passing.
+* Report: [`runs/report/PHASE6.md`](runs/report/PHASE6.md).
 * Watch and play games (PPO, evolved players, random, you): `notebooks/games_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_colab.ipynb)
 * Play against them by clicking on the board: `notebooks/games_click_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_click_colab.ipynb)
 * Train PPO yourself, every step written out in the notebook: `notebooks/ppo_training_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/ppo_training_colab.ipynb)
