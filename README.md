@@ -180,6 +180,13 @@ Results after 2000 generations (selection run vs control run):
   * the final policies beat the hour 0–6 snapshots 8 of 8, hours 8–10 7 of 8, hours 12–14 5 of 8, hour 15 4 of 8: gains slowing down at the end;
   * games stay long (about 600 moves): they have not learned to end games early by passing.
 * Report: [`runs/report/PHASE6.md`](runs/report/PHASE6.md).
+
+### Phase 6b: phase 6 continued at a lower learning rate (branch `claude/phase6b-chinese-lr`)
+* Resumes phase 6 for 20 more hours (36 h, 175.8k games in total) with lr 1e-4, 64 games per iteration and minibatch 2048. Command: `python -m goevo.ppo --rules chinese --sym --hours 36 --games 64 --lr 1e-4 --minibatch 2048 --resume`.
+* **Result:**
+  * beats the phase 6 final 25 of 32 (78%);
+  * most of the gain by about 28 h, then a plateau; games are still about 630 moves long.
+* Report: [`runs/report/PHASE6B.md`](runs/report/PHASE6B.md).
 * Watch and play games (PPO, evolved players, random, you): `notebooks/games_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_colab.ipynb)
 * Play against them by clicking on the board: `notebooks/games_click_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_click_colab.ipynb)
 * Train PPO yourself, every step written out in the notebook: `notebooks/ppo_training_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/ppo_training_colab.ipynb)
