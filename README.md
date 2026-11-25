@@ -187,6 +187,15 @@ Results after 2000 generations (selection run vs control run):
   * beats the phase 6 final 25 of 32 (78%);
   * most of the gain by about 28 h, then a plateau; games are still about 630 moves long.
 * Report: [`runs/report/PHASE6B.md`](runs/report/PHASE6B.md).
+
+### Phase 7: the large network under Chinese rules (branch `claude/phase7-chinese-big`)
+* The phase 5b–5e network (32 channels, 6 blocks) with phase 6's 2 extra planes, trained from scratch under Chinese rules with the 6b settings (64 games per iteration, minibatch 2048). It used lr 1e-4 until 31 h, then 5e-5 until 60 h: 1,139 iterations and 72.9k games. Command: `python -m goevo.ppo --rules chinese --channels 32 --blocks 6 --sym --hours 60 --games 64 --lr 5e-5 --minibatch 2048 --resume`.
+* **Result:**
+  * loses to the phase 6b final: 7 of 32 (22%);
+  * beats its own hour 8–24 snapshots 8 of 8 and hours 31–58 6 of 8; slow gains after about 31 h;
+  * about 1.2k games an hour, against 4k for 6b. A guess: the fewer games are the main reason it is weaker.
+* Report: [`runs/report/PHASE7.md`](runs/report/PHASE7.md).
+* Watch and play games with the network's output (move probabilities or logits) next to the board: `notebooks/games_policy_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_policy_colab.ipynb)
 * Watch and play games (PPO, evolved players, random, you): `notebooks/games_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_colab.ipynb)
 * Play against them by clicking on the board: `notebooks/games_click_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_click_colab.ipynb)
 * Train PPO yourself, every step written out in the notebook: `notebooks/ppo_training_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/ppo_training_colab.ipynb)
