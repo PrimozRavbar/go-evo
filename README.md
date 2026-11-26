@@ -195,6 +195,13 @@ Results after 2000 generations (selection run vs control run):
   * beats its own hour 8–24 snapshots 8 of 8 and hours 31–58 6 of 8; slow gains after about 31 h;
   * about 1.2k games an hour, against 4k for 6b. A guess: the fewer games are the main reason it is weaker.
 * Report: [`runs/report/PHASE7.md`](runs/report/PHASE7.md).
+
+### Phase 7b: phase 7 continued to 100 h (branch `claude/phase7b-chinese-big-more`)
+* Phase 7 resumed from its 60 h checkpoint with the same settings (lr 5e-5) for 40 more hours: 1,867 iterations and 119.5k games in total.
+* **Result:**
+  * beats the phase 7 final 25 of 32 (78%);
+  * still slightly behind the phase 6b final: 14 of 32 (44%), up from 7 of 32 for phase 7.
+* Report: [`runs/report/PHASE7B.md`](runs/report/PHASE7B.md).
 * Watch and play games with the network's output (move probabilities or logits) next to the board: `notebooks/games_policy_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_policy_colab.ipynb)
 * Watch and play games (PPO, evolved players, random, you): `notebooks/games_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_colab.ipynb)
 * Play against them by clicking on the board: `notebooks/games_click_colab.ipynb` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PrimozRavbar/go-evo/blob/main/notebooks/games_click_colab.ipynb)
