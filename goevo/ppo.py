@@ -34,7 +34,7 @@ import torch.nn.functional as F
 from .engine import make_game
 from .match import CHINESE, GameConfig, own_eye_mask
 from .parallel import _play
-from .player import NetConfig, ResNet, encode_planes, random_genome, save_population
+from .player import NetConfig, ResNet, encode_planes, load_population, random_genome, save_population
 
 VH = 16  # value head hidden width
 
@@ -267,6 +267,9 @@ def main(argv=None):
     ap.add_argument("--games", type=int, default=32, help="games per iteration")
     ap.add_argument("--p-self", type=float, default=0.5, help="prob. opponent = current policy")
     ap.add_argument("--pool-size", type=int, default=50)
+    ap.add_argument("--anchors", nargs="*", default=[],
+                    help="checkpoint files whose last policy stays in the opponent set for good (same network size)")
+    ap.add_argument("--p-anchor", type=float, default=0.0, help="prob. opponent = one of the anchors")
     ap.add_argument("--snapshot-every", type=int, default=10, help="iterations between pool snapshots")
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--epochs", type=int, default=3)
@@ -334,6 +337,13 @@ def main(argv=None):
                     "next_ckpt": next_ckpt, "rng": rng.bit_generator.state}, state_path + ".tmp")
         os.replace(state_path + ".tmp", state_path)
 
+    anchors = []
+    for path in a.anchors:
+        g, c, *_ = load_population(path)
+        assert c == net_cfg, f"anchor {path} has a different network: {c}"
+        anchors.append(g[-1])
+    if anchors:
+        print(f"anchors: {a.anchors}, p_anchor {a.p_anchor}", flush=True)
     while elapsed < budget and (a.max_iters <= 0 or it < a.max_iters):
         if elapsed >= next_ckpt:  # hourly policy checkpoint (for ancestor comparisons)
             save_population(f"{a.out}/h{round(next_ckpt / 3600):02d}.pt", [model.genome()], net_cfg,
@@ -343,7 +353,13 @@ def main(argv=None):
         pol, vh = model.genome(), model.value_head()
         jobs = []
         for k in range(a.games):
-            opp = None if rng.random() < a.p_self else opp_pool[int(rng.integers(len(opp_pool)))]
+            r = rng.random()
+            if r < a.p_self:
+                opp = None
+            elif anchors and r < a.p_self + a.p_anchor:
+                opp = anchors[int(rng.integers(len(anchors)))]
+            else:
+                opp = opp_pool[int(rng.integers(len(opp_pool)))]
             jobs.append((pol, vh, opp, 1 if k % 2 == 0 else -1, int(rng.integers(2 ** 31)), net_cfg, gc, a.sym))
         res = pool.map(_rollout, jobs, chunksize=1)
         t1 = time.time()
